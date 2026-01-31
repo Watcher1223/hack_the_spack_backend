@@ -23,7 +23,8 @@ services:
       - "8001:8001"
     environment:
       - PORT=8001
-      - MONGODB_URI=mongodb://admin:admin123@mongodb:27017/agent_db?authSource=admin
+      # - MONGODB_URI=mongodb://admin:admin123@mongodb:27017/agent_db?authSource=admin
+      - MONGODB_URI=mongodb+srv://yc-hackathon:YC-Hackathon@cluster0.1xcyfb.mongodb.net/hackathon-db?appName=Cluster0
     env_file:
       - dev.env
     volumes:
