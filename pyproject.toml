@@ -12,4 +12,5 @@ dependencies = [
     "uvicorn>=0.34.0",
     "pymongo>=4.10.1",
     "voyageai>=0.3.3",
+    "mcp>=1.0.0",
 ]
