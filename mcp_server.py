@@ -129,7 +129,94 @@ async def health() -> dict:
     }
 
 
+def create_sse_app():
+    """
+    Create an ASGI app for HTTP/SSE transport.
+    This allows the MCP server to be deployed on web platforms like Render.
+    """
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.responses import JSONResponse
+    from sse_starlette import EventSourceResponse
+    from mcp.server.sse import SseServerTransport
+    import json
+
+    async def handle_sse(request):
+        """Handle SSE connections for MCP protocol"""
+        async def event_generator():
+            transport = SseServerTransport("/messages")
+
+            async def write_message(message):
+                """Send message via SSE"""
+                yield {
+                    "event": "message",
+                    "data": json.dumps(message)
+                }
+
+            # Connect transport to MCP server
+            async with transport.connect_sse(request.scope, request.receive, write_message):
+                # Handle incoming messages
+                async for message in transport:
+                    await mcp._mcp_server.handle_message(message)
+
+        return EventSourceResponse(event_generator())
+
+    async def handle_messages(request):
+        """Handle POST messages for MCP protocol"""
+        body = await request.json()
+        result = await mcp._mcp_server.handle_message(body)
+        return JSONResponse(result)
+
+    async def health_check(request):
+        """HTTP health check endpoint"""
+        return JSONResponse({
+            "status": "healthy",
+            "service": "universal-adapter-mcp",
+            "version": "1.0.0",
+            "transport": "sse"
+        })
+
+    async def root(request):
+        """Root endpoint with server info"""
+        return JSONResponse({
+            "name": "Universal Adapter MCP Server",
+            "version": "1.0.0",
+            "protocol": "mcp",
+            "transport": "sse",
+            "endpoints": {
+                "/sse": "SSE endpoint for MCP clients",
+                "/messages": "POST endpoint for MCP messages",
+                "/health": "Health check"
+            }
+        })
+
+    app = Starlette(
+        routes=[
+            Route("/", root),
+            Route("/health", health_check),
+            Route("/sse", handle_sse),
+            Route("/messages", handle_messages, methods=["POST"]),
+        ]
+    )
+
+    return app
+
+
 if __name__ == "__main__":
-    logger.info("Starting MCP server with stdio transport")
-    # FastMCP uses stdio by default - perfect for local clients like Claude Desktop
-    mcp.run()
+    import sys
+    import os
+
+    # Check if running in HTTP mode (for Render, Heroku, etc.)
+    mode = os.getenv("MCP_TRANSPORT", "stdio")
+
+    if "--http" in sys.argv or mode == "http":
+        # HTTP/SSE mode for remote access
+        logger.info("Starting MCP server with HTTP/SSE transport")
+        import uvicorn
+        app = create_sse_app()
+        port = int(os.getenv("PORT", os.getenv("MCP_PORT", 8002)))
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    else:
+        # stdio mode for local clients (Claude Desktop, etc.)
+        logger.info("Starting MCP server with stdio transport")
+        mcp.run()
