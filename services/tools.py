@@ -211,7 +211,13 @@ class Firecrawl:
         """
         Search the web using Firecrawl and get full page content.
         """
-        emit_log("firecrawl", f"Searching web: {query[:80]}...", level="info", query=query, limit=limit)
+        emit_log(
+            "firecrawl",
+            f"Searching web: {query[:80]}...",
+            level="info",
+            query=query,
+            limit=limit,
+        )
         url = f"{self.base_url}/search"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -223,8 +229,15 @@ class Firecrawl:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
-            count = len(data.get("data", [])) if isinstance(data.get("data"), list) else 0
-            emit_log("firecrawl", f"Found {count} result(s) for search", level="info", count=count)
+            count = (
+                len(data.get("data", [])) if isinstance(data.get("data"), list) else 0
+            )
+            emit_log(
+                "firecrawl",
+                f"Found {count} result(s) for search",
+                level="info",
+                count=count,
+            )
             return data
 
     async def scrape(
@@ -254,7 +267,12 @@ class Firecrawl:
             response = await client.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
-            emit_log("firecrawl", f"Scraped content from {url[:50]}...", level="info", url=url)
+            emit_log(
+                "firecrawl",
+                f"Scraped content from {url[:50]}...",
+                level="info",
+                url=url,
+            )
             return data
 
     async def crawl(
@@ -263,7 +281,13 @@ class Firecrawl:
         """
         Crawl an entire website starting from a URL.
         """
-        emit_log("firecrawl", f"Crawling site {url[:80]}...", level="info", url=url, limit=limit)
+        emit_log(
+            "firecrawl",
+            f"Crawling site {url[:80]}...",
+            level="info",
+            url=url,
+            limit=limit,
+        )
         api_url = f"{self.base_url}/crawl"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -280,7 +304,9 @@ class Firecrawl:
             response = await client.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
-            emit_log("firecrawl", f"Crawl completed for {url[:50]}...", level="info", url=url)
+            emit_log(
+                "firecrawl", f"Crawl completed for {url[:50]}...", level="info", url=url
+            )
             return data
 
 
@@ -295,6 +321,63 @@ class ToolDefinition(BaseModel):
     parameters: dict
     code: Optional[str] = None  # Python function code as string
     dependencies: Optional[list[str]] = None  # Required packages
+    api_reference_url: Optional[str] = (
+        None  # API documentation URL used to generate this tool
+    )
+
+
+def _validate_tool_code(name: str, code: str) -> dict:
+    """
+    Validate that the generated tool code is syntactically correct
+    and contains the expected function definition.
+
+    Args:
+        name: Name of the tool/function
+        code: Python code to validate
+
+    Returns:
+        dict with success status and error message if validation fails
+    """
+    if not code:
+        return {"success": True}  # No code to validate (schema-only tool)
+
+    try:
+        # Create execution environment
+        exec_globals = _get_safe_exec_environment(code)
+        exec_locals = {}
+
+        # Try to compile and execute the code
+        compile(code, '<string>', 'exec')
+        exec(code, exec_globals, exec_locals)
+
+        # Check if the function with the expected name exists
+        if name not in exec_locals:
+            return {
+                "success": False,
+                "error": f"Function '{name}' not found in generated code. The function name must match the tool name."
+            }
+
+        # Check if it's actually a function
+        if not callable(exec_locals[name]):
+            return {
+                "success": False,
+                "error": f"'{name}' is not a callable function in the generated code."
+            }
+
+        return {"success": True}
+
+    except SyntaxError as e:
+        return {
+            "success": False,
+            "error": f"Syntax error in generated code: {str(e)}",
+            "type": "SyntaxError"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error validating code: {str(e)}",
+            "type": type(e).__name__
+        }
 
 
 def save_tool(tool_definition: dict) -> dict:
@@ -302,6 +385,7 @@ def save_tool(tool_definition: dict) -> dict:
     Save a generated tool definition to MongoDB.
     Validates and stores both schema and executable code.
     Normalizes parameter schema to ensure JSON Schema compliance.
+    Validates that code is syntactically correct before saving.
     """
     # Normalize parameter schema before validation
     if "parameters" in tool_definition:
@@ -312,10 +396,33 @@ def save_tool(tool_definition: dict) -> dict:
     # Validate tool definition
     tool = ToolDefinition(**tool_definition)
 
-    # Save to MongoDB
+    # Validate the generated code BEFORE saving to database
+    if tool.code:
+        validation_result = _validate_tool_code(tool.name, tool.code)
+        if not validation_result.get("success"):
+            error_msg = validation_result.get("error", "Code validation failed")
+            emit_log(
+                "mcp",
+                f"Tool '{tool.name}' validation failed: {error_msg}",
+                level="error",
+                tool_name=tool.name,
+                error=error_msg
+            )
+            return {
+                "success": False,
+                "error": error_msg,
+                "type": validation_result.get("type", "ValidationError")
+            }
+
+    # Save to MongoDB only if validation passed
     out = db.save_tool(tool.model_dump())
     if out.get("success"):
-        emit_log("mcp", f"Tool '{name}' registered in marketplace", level="success", tool_name=name)
+        emit_log(
+            "mcp",
+            f"Tool '{tool.name}' registered in marketplace",
+            level="success",
+            tool_name=tool.name,
+        )
     return out
 
 
@@ -354,9 +461,16 @@ async def search_tools(query: str, limit: int = 10) -> dict:
         Dictionary with success status and list of relevant tools
     """
     try:
-        emit_log("agent", f"Searching tools: {query[:60]}...", level="info", query=query)
+        emit_log(
+            "agent", f"Searching tools: {query[:60]}...", level="info", query=query
+        )
         tools = db.search_tools(query, limit)
-        emit_log("agent", f"Found {len(tools)} relevant tool(s)", level="info", count=len(tools))
+        emit_log(
+            "agent",
+            f"Found {len(tools)} relevant tool(s)",
+            level="info",
+            count=len(tools),
+        )
         return {
             "success": True,
             "query": query,
@@ -420,7 +534,7 @@ def _get_safe_exec_environment(code: str) -> dict:
 
     # Extract imports from code using regex
     # Matches: import x, from x import y, from x import y as z
-    import_pattern = r'(?:from\s+(\w+)\s+import\s+[\w\s,]+|import\s+([\w\s,]+))'
+    import_pattern = r"(?:from\s+(\w+)\s+import\s+[\w\s,]+|import\s+([\w\s,]+))"
     matches = re.findall(import_pattern, code)
 
     # Also look for direct usage of whitelisted modules
@@ -760,6 +874,10 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "List of required Python packages (e.g., ['httpx', 'beautifulsoup4'])",
+                        },
+                        "api_reference_url": {
+                            "type": "string",
+                            "description": "The URL of the API documentation that was used to generate this tool (from firecrawl_scrape)",
                         },
                     },
                     "required": ["name", "description", "parameters", "code"],

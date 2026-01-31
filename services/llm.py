@@ -37,6 +37,7 @@ SYSTEM_PROMPT = """
        - Proper imports (httpx, base64, from services.tools import file_write)
        - Error handling and response parsing
        - Base64 encoding for binary data (images, PDFs)
+       - api_reference_url: The URL you scraped with firecrawl_scrape (REQUIRED)
        - IMPORTANT: The tool should also SAVE the file using file_write with mode="wb"
     6. The tool auto-reloads immediately and becomes available
     7. Execute the tool (newly generated or found from marketplace) with appropriate parameters
@@ -242,10 +243,26 @@ class Agent:
 
         self.messages.append({"role": "user", "content": question})
 
+        # Emit agent start event
+        emit_log(
+            "agent",
+            f"Starting agent with question: {question[:100]}",
+            level="info",
+            type="agent_start",
+            question=question,
+            model=self.model,
+            max_iterations=max_iterations,
+        )
+
         # Agent loop - handle tool calls iteratively
         for iteration in range(max_iterations):
             logger.info(f"Agent iteration {iteration + 1}/{max_iterations}")
-            emit_log("agent", f"Iteration {iteration + 1}/{max_iterations}", level="info", iteration=iteration + 1)
+            emit_log(
+                "agent",
+                f"Iteration {iteration + 1}/{max_iterations}",
+                level="info",
+                iteration=iteration + 1,
+            )
 
             payload = {
                 "model": self.model,
@@ -274,9 +291,26 @@ class Agent:
                     # Add assistant message to history
                     self.messages.append(message)
 
+                    # Emit assistant message if present
+                    if output:
+                        emit_log(
+                            "agent",
+                            output,
+                            level="info",
+                            type="assistant_message",
+                            iteration=iteration + 1,
+                            content=output,
+                        )
+
                     # If no tool calls, we're done
                     if not tool_calls:
                         logger.info("No tool calls, returning response")
+                        emit_log(
+                            "agent",
+                            "Task completed - no more tool calls",
+                            level="info",
+                            type="completion",
+                        )
                         self.result.output = output or ""
                         self.result.usage = usage
                         self.save_conversation_history(self.result)
@@ -284,11 +318,16 @@ class Agent:
 
                     # Execute tool calls
                     logger.info(f"Processing {len(tool_calls)} tool call(s)")
-                    emit_log("agent", f"Processing {len(tool_calls)} tool call(s)", level="info", count=len(tool_calls))
+                    emit_log(
+                        "agent",
+                        f"Processing {len(tool_calls)} tool call(s)",
+                        level="info",
+                        count=len(tool_calls),
+                        type="tool_calls_start",
+                    )
                     for tool_call in tool_calls:
                         tool_name = tool_call["function"]["name"]
                         tool_id = tool_call["id"]
-                        emit_log("agent", f"Executing tool: {tool_name}", level="info", tool_name=tool_name)
 
                         # Parse arguments safely
                         tool_args_raw = tool_call["function"]["arguments"]
@@ -301,6 +340,17 @@ class Agent:
                                     tool_args = json.loads(tool_args_raw)
                             else:
                                 tool_args = tool_args_raw
+
+                            # Emit tool call event with arguments
+                            emit_log(
+                                "agent",
+                                f"Calling {tool_name} with arguments: {json.dumps(tool_args)[:100]}",
+                                level="info",
+                                type="tool_call",
+                                tool_name=tool_name,
+                                tool_id=tool_id,
+                                arguments=tool_args,
+                            )
                         except json.JSONDecodeError as e:
                             logger.error(
                                 f"Failed to parse tool arguments for {tool_name}: {e}"
@@ -323,10 +373,37 @@ class Agent:
 
                         # Execute the tool
                         tool_result = await self.execute_tool(tool_name, tool_args)
+
+                        # Emit tool result event
                         if "error" in tool_result:
-                            emit_log("agent", f"Tool {tool_name} error: {str(tool_result.get('error', ''))[:80]}", level="error", tool_name=tool_name)
+                            emit_log(
+                                "agent",
+                                f"Tool {tool_name} failed: {str(tool_result.get('error', ''))[:100]}",
+                                level="error",
+                                type="tool_result",
+                                tool_name=tool_name,
+                                tool_id=tool_id,
+                                status="error",
+                                error=str(tool_result.get("error", ""))[:200],
+                            )
                         else:
-                            emit_log("agent", f"Tool {tool_name} completed", level="info", tool_name=tool_name)
+                            # Truncate result for display
+                            result_str = str(tool_result)
+                            result_preview = (
+                                result_str[:200] + "..."
+                                if len(result_str) > 200
+                                else result_str
+                            )
+                            emit_log(
+                                "agent",
+                                f"Tool {tool_name} completed successfully",
+                                level="info",
+                                type="tool_result",
+                                tool_name=tool_name,
+                                tool_id=tool_id,
+                                status="success",
+                                result_preview=result_preview,
+                            )
 
                         # Add tool result to messages
                         self.messages.append(
@@ -342,12 +419,27 @@ class Agent:
                 else:
                     error_msg = f"Error {response.status_code} with Openrouter call: {response.text}"
                     logger.error(error_msg)
+                    emit_log(
+                        "agent",
+                        f"API error: {error_msg[:200]}",
+                        level="error",
+                        type="api_error",
+                        status_code=response.status_code,
+                        error=error_msg[:500],
+                    )
                     self.result.output = error_msg
                     self.save_conversation_history(self.result)
                     return self.result
 
         # Max iterations reached
         logger.warning(f"Max iterations ({max_iterations}) reached")
+        emit_log(
+            "agent",
+            f"Max iterations ({max_iterations}) reached without completion",
+            level="warn",
+            type="max_iterations",
+            max_iterations=max_iterations,
+        )
         self.result.output = "Max iterations reached without final response"
         self.save_conversation_history(self.result)
         return self.result

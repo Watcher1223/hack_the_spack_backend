@@ -3,6 +3,7 @@ Real-time agent log streaming for the frontend.
 Uses a per-conversation queue and context so tools/agent can emit events
 that GET /api/discovery/stream streams as SSE.
 """
+
 import asyncio
 import contextvars
 from datetime import datetime, timezone
@@ -13,8 +14,8 @@ _discovery_queues: Dict[str, asyncio.Queue] = {}
 _queue_lock = asyncio.Lock()
 
 # Context var so the current request's queue is visible to agent and tools
-_log_queue_ctx: contextvars.ContextVar[Optional[asyncio.Queue]] = contextvars.ContextVar(
-    "agent_log_queue", default=None
+_log_queue_ctx: contextvars.ContextVar[Optional[asyncio.Queue]] = (
+    contextvars.ContextVar("agent_log_queue", default=None)
 )
 
 # Sentinel to signal stream end
@@ -93,7 +94,12 @@ async def drain_queue_until_done(
         try:
             event = await asyncio.wait_for(q.get(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
-            yield {"timestamp": _timestamp(), "source": "system", "message": "Stream timeout", "level": "warn"}
+            yield {
+                "timestamp": _timestamp(),
+                "source": "system",
+                "message": "Stream timeout",
+                "level": "warn",
+            }
             continue
         if event.get("done"):
             yield event
