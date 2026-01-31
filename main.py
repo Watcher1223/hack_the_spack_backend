@@ -1,9 +1,11 @@
 import asyncio
+import sys
+
 from services.llm import Agent
 
-async def main():
+async def main(question: str):
     # Test question that should use the search tool
-    question = "Get me the real-time stream flow data for the Mississippi River."
+    # question = "Get me the real-time stream flow data for the Mississippi River."
 
     agent = Agent()
     res = await agent.run(question, max_iterations=25)
@@ -19,4 +21,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    question = sys.argv[1]
+    asyncio.run(main(question))

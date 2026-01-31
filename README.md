@@ -47,8 +47,23 @@ FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 
 ### 4. Run the Agent
 
+Pass your question as a command-line argument:
+
 ```bash
-python main.py
+uv run main.py "Download an image of a cat and save it to the cat directory"
+```
+
+Or try other examples:
+
+```bash
+# Get real-time data
+uv run main.py "Get me the real-time stream flow data for the Mississippi River"
+
+# Fetch weather data
+uv run main.py "Get current weather for Austin, TX and save it to a file"
+
+# Download and process content
+uv run main.py "Scrape the latest news from HackerNews and summarize it"
 ```
 
 The agent will autonomously:
@@ -118,50 +133,68 @@ All of this happens **autonomously** in one execution, no user intervention requ
 ### Basic Tests
 ```bash
 # Test file operations
-python test_file_operations.py
+uv run test_file_operations.py
 
 # Test tool execution
-python test_tool_execution.py
+uv run test_tool_execution.py
 
 # Test auto-reload feature
-python test_auto_reload.py
+uv run test_auto_reload.py
 ```
 
 ### Example Scripts
 ```bash
 # Run example workflows
-python example_usage.py
+uv run example_usage.py
 ```
 
 ## Advanced Usage
 
-### Custom Prompts
+### Running Different Tasks
 
-Edit `main.py` to change the task:
+Simply pass different questions as command-line arguments:
 
-```python
-question = "Get real-time weather data for Austin, TX and save it to a file"
+```bash
+# API data retrieval
+uv run main.py "Fetch Bitcoin price from CoinGecko API"
+
+# Web scraping and analysis
+uv run main.py "Find and download the top 5 Python repos on GitHub"
+
+# Data processing
+uv run main.py "Get COVID-19 statistics and create a summary report"
+
+# Image/file operations
+uv run main.py "Download the Eiffel Tower image and save it"
 ```
 
-The agent will:
-1. Find a weather API
-2. Generate a tool to fetch weather data
-3. Execute it and save results
+The agent will automatically:
+1. Search for relevant APIs
+2. Generate tools to interact with them
+3. Execute the tools
+4. Save results to `artifacts/`
 
 ### View Conversation Logs
 
 ```bash
-python view_conversations.py
+uv run view_conversations.py
 ```
 
 Shows complete conversation history with all tool calls and results.
 
-### Increase Iterations
+### Modify Behavior
 
-For complex tasks, increase max iterations:
+To change max iterations or other settings, edit `main.py`:
 
 ```python
-res = await agent.run(question, max_iterations=25)  # Default is 10
+# Increase iterations for complex tasks
+res = await agent.run(question, max_iterations=50)
+
+# Change the model
+agent = Agent(model="anthropic/claude-opus-4.5")
+
+# Disable conversation logging
+agent = Agent(save_conversations=False)
 ```
 
 ## Configuration
