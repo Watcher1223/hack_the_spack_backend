@@ -3,6 +3,7 @@ import sys
 
 from services.llm import Agent
 
+
 async def main(question: str):
     # Test question that should use the search tool
     # question = "Get me the real-time stream flow data for the Mississippi River."
@@ -10,13 +11,13 @@ async def main(question: str):
     agent = Agent()
     res = await agent.run(question, max_iterations=25)
 
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("AGENT OUTPUT:")
-    print("="*50)
+    print("=" * 50)
     print(res.output)
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("USAGE:")
-    print("="*50)
+    print("=" * 50)
     print(res.usage)
 
 

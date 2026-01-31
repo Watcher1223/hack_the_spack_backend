@@ -1,6 +1,9 @@
+import base64
 import httpx
+import inspect
 import json
 import os
+
 from pathlib import Path
 from typing import Optional, Any, Callable
 from pydantic import BaseModel
@@ -10,6 +13,7 @@ from pydantic import BaseModel
 # ============================================
 
 ARTIFACTS_DIR = "artifacts"
+
 
 def _get_safe_path(filepath: str) -> Path:
     """
@@ -25,12 +29,16 @@ def _get_safe_path(filepath: str) -> Path:
 
     # Check if target is within base directory
     if not str(target_path).startswith(str(base_path)):
-        raise ValueError(f"Access denied: Path '{filepath}' is outside artifacts directory")
+        raise ValueError(
+            f"Access denied: Path '{filepath}' is outside artifacts directory"
+        )
 
     return target_path
 
 
-async def file_read(filepath: str, mode: str = "r", encoding: str = "utf-8") -> dict[str, Any]:
+async def file_read(
+    filepath: str, mode: str = "r", encoding: str = "utf-8"
+) -> dict[str, Any]:
     """
     Read a file from the artifacts directory.
     Handles both text and binary data.
@@ -44,29 +52,22 @@ async def file_read(filepath: str, mode: str = "r", encoding: str = "utf-8") -> 
         safe_path = _get_safe_path(filepath)
 
         if not safe_path.exists():
-            return {
-                "success": False,
-                "error": f"File not found: {filepath}"
-            }
+            return {"success": False, "error": f"File not found: {filepath}"}
 
         if not safe_path.is_file():
-            return {
-                "success": False,
-                "error": f"Not a file: {filepath}"
-            }
+            return {"success": False, "error": f"Not a file: {filepath}"}
 
         # Validate mode
-        if mode not in ['r', 'rb']:
+        if mode not in ["r", "rb"]:
             return {
                 "success": False,
-                "error": f"Invalid mode: {mode}. Use 'r' (text) or 'rb' (binary)"
+                "error": f"Invalid mode: {mode}. Use 'r' (text) or 'rb' (binary)",
             }
 
         # Read binary data
-        if mode == 'rb':
-            import base64
+        if mode == "rb":
             binary_data = safe_path.read_bytes()
-            content = base64.b64encode(binary_data).decode('ascii')
+            content = base64.b64encode(binary_data).decode("ascii")
             content_type = "binary_base64"
         # Read text data
         else:
@@ -78,17 +79,16 @@ async def file_read(filepath: str, mode: str = "r", encoding: str = "utf-8") -> 
             "filepath": filepath,
             "content": content,
             "content_type": content_type,
-            "size": safe_path.stat().st_size
+            "size": safe_path.stat().st_size,
         }
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error reading file: {str(e)}"
-        }
+        return {"success": False, "error": f"Error reading file: {str(e)}"}
 
 
-async def file_write(filepath: str, content: str, mode: str = "w", encoding: str = "utf-8") -> dict[str, Any]:
+async def file_write(
+    filepath: str, content: str, mode: str = "w", encoding: str = "utf-8"
+) -> dict[str, Any]:
     """
     Write content to a file in the artifacts directory.
     Handles both text and binary data automatically.
@@ -106,31 +106,29 @@ async def file_write(filepath: str, content: str, mode: str = "w", encoding: str
         safe_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Validate mode
-        valid_modes = ['w', 'a', 'wb', 'ab']
+        valid_modes = ["w", "a", "wb", "ab"]
         if mode not in valid_modes:
             return {
                 "success": False,
-                "error": f"Invalid mode: {mode}. Use 'w', 'a', 'wb', or 'ab'"
+                "error": f"Invalid mode: {mode}. Use 'w', 'a', 'wb', or 'ab'",
             }
 
-        is_binary = mode in ['wb', 'ab']
-        is_append = mode in ['a', 'ab']
+        is_binary = mode in ["wb", "ab"]
+        is_append = mode in ["a", "ab"]
 
         # Handle binary data
         if is_binary:
-            import base64
-
             # Content should be base64 encoded for binary
             try:
                 binary_data = base64.b64decode(content)
             except Exception as e:
                 return {
                     "success": False,
-                    "error": f"Binary mode requires base64 encoded content: {str(e)}"
+                    "error": f"Binary mode requires base64 encoded content: {str(e)}",
                 }
 
             if is_append:
-                with open(safe_path, 'ab') as f:
+                with open(safe_path, "ab") as f:
                     f.write(binary_data)
             else:
                 safe_path.write_bytes(binary_data)
@@ -138,7 +136,7 @@ async def file_write(filepath: str, content: str, mode: str = "w", encoding: str
         # Handle text data
         else:
             if is_append:
-                with open(safe_path, 'a', encoding=encoding) as f:
+                with open(safe_path, "a", encoding=encoding) as f:
                     f.write(content)
             else:
                 safe_path.write_text(content, encoding=encoding)
@@ -149,14 +147,11 @@ async def file_write(filepath: str, content: str, mode: str = "w", encoding: str
             "absolute_path": str(safe_path),
             "size": safe_path.stat().st_size,
             "mode": "binary" if is_binary else "text",
-            "operation": "appended" if is_append else "overwritten"
+            "operation": "appended" if is_append else "overwritten",
         }
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error writing file: {str(e)}"
-        }
+        return {"success": False, "error": f"Error writing file: {str(e)}"}
 
 
 async def file_list(directory: str = ".") -> dict[str, Any]:
@@ -167,42 +162,36 @@ async def file_list(directory: str = ".") -> dict[str, Any]:
         safe_path = _get_safe_path(directory)
 
         if not safe_path.exists():
-            return {
-                "success": False,
-                "error": f"Directory not found: {directory}"
-            }
+            return {"success": False, "error": f"Directory not found: {directory}"}
 
         if not safe_path.is_dir():
-            return {
-                "success": False,
-                "error": f"Not a directory: {directory}"
-            }
+            return {"success": False, "error": f"Not a directory: {directory}"}
 
         items = []
         for item in safe_path.iterdir():
-            items.append({
-                "name": item.name,
-                "type": "directory" if item.is_dir() else "file",
-                "size": item.stat().st_size if item.is_file() else None
-            })
+            items.append(
+                {
+                    "name": item.name,
+                    "type": "directory" if item.is_dir() else "file",
+                    "size": item.stat().st_size if item.is_file() else None,
+                }
+            )
 
         return {
             "success": True,
             "directory": directory,
             "items": items,
-            "count": len(items)
+            "count": len(items),
         }
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error listing directory: {str(e)}"
-        }
+        return {"success": False, "error": f"Error listing directory: {str(e)}"}
 
 
 # ============================================
 # Firecrawl API Client
 # ============================================
+
 
 class Firecrawl:
     def __init__(self, api_key: str):
@@ -210,10 +199,7 @@ class Firecrawl:
         self.api_key = api_key
 
     async def search(
-        self,
-        query: str,
-        limit: int = 5,
-        timeout: int = 60000
+        self, query: str, limit: int = 5, timeout: int = 60000
     ) -> dict[str, Any]:
         """
         Search the web using Firecrawl and get full page content.
@@ -221,13 +207,9 @@ class Firecrawl:
         url = f"{self.base_url}/search"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        payload = {
-            "query": query,
-            "limit": limit,
-            "timeout": timeout
-        }
+        payload = {"query": query, "limit": limit, "timeout": timeout}
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
@@ -239,7 +221,7 @@ class Firecrawl:
         url: str,
         formats: list[str] = None,
         only_main_content: bool = True,
-        timeout: int = 30000
+        timeout: int = 30000,
     ) -> dict[str, Any]:
         """
         Scrape a single URL and extract content in specified formats.
@@ -247,13 +229,13 @@ class Firecrawl:
         api_url = f"{self.base_url}/scrape"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         payload = {
             "url": url,
             "formats": formats or ["markdown"],
             "onlyMainContent": only_main_content,
-            "timeout": timeout
+            "timeout": timeout,
         }
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -262,11 +244,7 @@ class Firecrawl:
             return response.json()
 
     async def crawl(
-        self,
-        url: str,
-        limit: int = 10,
-        max_depth: int = 2,
-        timeout: int = 120000
+        self, url: str, limit: int = 10, max_depth: int = 2, timeout: int = 120000
     ) -> dict[str, Any]:
         """
         Crawl an entire website starting from a URL.
@@ -274,13 +252,13 @@ class Firecrawl:
         api_url = f"{self.base_url}/crawl"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         payload = {
             "url": url,
             "limit": limit,
             "maxDepth": max_depth,
-            "timeout": timeout
+            "timeout": timeout,
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -294,6 +272,7 @@ class Firecrawl:
 # ============================================
 
 TOOLS_DIR = "generated_tools"
+
 
 class ToolDefinition(BaseModel):
     name: str
@@ -314,14 +293,14 @@ def save_tool(tool_definition: dict) -> dict:
     tool = ToolDefinition(**tool_definition)
     file_path = os.path.join(TOOLS_DIR, f"{tool.name}.json")
 
-    with open(file_path, 'w') as f:
+    with open(file_path, "w") as f:
         json.dump(tool.model_dump(), f, indent=2)
 
     return {
         "success": True,
         "message": f"Tool '{tool.name}' saved successfully",
         "path": file_path,
-        "has_code": tool.code is not None
+        "has_code": tool.code is not None,
     }
 
 
@@ -334,7 +313,7 @@ def load_tool(name: str) -> dict:
     if not os.path.exists(file_path):
         return {"success": False, "error": f"Tool '{name}' not found"}
 
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         return json.load(f)
 
 
@@ -347,8 +326,8 @@ def list_tools() -> list[dict]:
 
     tools = []
     for filename in os.listdir(TOOLS_DIR):
-        if filename.endswith('.json'):
-            with open(os.path.join(TOOLS_DIR, filename), 'r') as f:
+        if filename.endswith(".json"):
+            with open(os.path.join(TOOLS_DIR, filename), "r") as f:
                 tools.append(json.load(f))
     return tools
 
@@ -368,16 +347,16 @@ async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
     if not code:
         return {
             "error": f"Tool '{tool_name}' has no executable code. It's just a schema definition.",
-            "suggestion": "You need to generate the implementation code for this tool first."
+            "suggestion": "You need to generate the implementation code for this tool first.",
         }
 
     try:
         # Create a restricted execution environment
         exec_globals = {
-            '__builtins__': __builtins__,
-            'httpx': httpx,
-            'json': json,
-            'os': os,
+            "__builtins__": __builtins__,
+            "httpx": httpx,
+            "json": json,
+            "os": os,
         }
         exec_locals = {}
 
@@ -391,7 +370,6 @@ async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
         func = exec_locals[tool_name]
 
         # Execute the function with arguments
-        import inspect
         if inspect.iscoroutinefunction(func):
             result = await func(**arguments)
         else:
@@ -402,7 +380,7 @@ async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
     except Exception as e:
         return {
             "error": f"Error executing generated tool '{tool_name}': {str(e)}",
-            "type": type(e).__name__
+            "type": type(e).__name__,
         }
 
 
@@ -420,8 +398,10 @@ def load_generated_tools() -> tuple[list[dict], dict[str, Callable]]:
 
     def make_async_wrapper(tool_name: str):
         """Create an async wrapper for a tool with proper closure"""
+
         async def wrapper(**kwargs):
             return await execute_generated_tool(tool_name, kwargs)
+
         return wrapper
 
     for tool in tools:
@@ -431,8 +411,8 @@ def load_generated_tools() -> tuple[list[dict], dict[str, Callable]]:
             "function": {
                 "name": tool["name"],
                 "description": tool["description"],
-                "parameters": tool["parameters"]
-            }
+                "parameters": tool["parameters"],
+            },
         }
         tool_schemas.append(schema)
 
@@ -446,6 +426,7 @@ def load_generated_tools() -> tuple[list[dict], dict[str, Callable]]:
 # ============================================
 # Tool Registry - Convert to OpenRouter Format
 # ============================================
+
 
 def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callable]]:
     """
@@ -468,23 +449,23 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Path to the file relative to artifacts directory (e.g., 'data.txt', 'images/cat.jpg')"
+                            "description": "Path to the file relative to artifacts directory (e.g., 'data.txt', 'images/cat.jpg')",
                         },
                         "mode": {
                             "type": "string",
                             "description": "Read mode: 'r' for text files, 'rb' for binary files (returns base64)",
                             "enum": ["r", "rb"],
-                            "default": "r"
+                            "default": "r",
                         },
                         "encoding": {
                             "type": "string",
                             "description": "Text encoding (only for text mode, default: utf-8)",
-                            "default": "utf-8"
-                        }
+                            "default": "utf-8",
+                        },
                     },
-                    "required": ["filepath"]
-                }
-            }
+                    "required": ["filepath"],
+                },
+            },
         },
         {
             "type": "function",
@@ -496,27 +477,27 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Path to the file relative to artifacts directory (e.g., 'output.txt', 'cat/image.jpg')"
+                            "description": "Path to the file relative to artifacts directory (e.g., 'output.txt', 'cat/image.jpg')",
                         },
                         "content": {
                             "type": "string",
-                            "description": "Content to write. For text: plain string. For binary (images, etc.): base64 encoded string"
+                            "description": "Content to write. For text: plain string. For binary (images, etc.): base64 encoded string",
                         },
                         "mode": {
                             "type": "string",
                             "description": "Write mode: 'w' (text overwrite), 'a' (text append), 'wb' (binary overwrite), 'ab' (binary append)",
                             "enum": ["w", "a", "wb", "ab"],
-                            "default": "w"
+                            "default": "w",
                         },
                         "encoding": {
                             "type": "string",
                             "description": "Text encoding (only for text mode, default: utf-8)",
-                            "default": "utf-8"
-                        }
+                            "default": "utf-8",
+                        },
                     },
-                    "required": ["filepath", "content"]
-                }
-            }
+                    "required": ["filepath", "content"],
+                },
+            },
         },
         {
             "type": "function",
@@ -529,11 +510,11 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                         "directory": {
                             "type": "string",
                             "description": "Directory path relative to artifacts (default: '.' for root)",
-                            "default": "."
+                            "default": ".",
                         }
-                    }
-                }
-            }
+                    },
+                },
+            },
         },
         {
             "type": "function",
@@ -543,19 +524,16 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query"
-                        },
+                        "query": {"type": "string", "description": "The search query"},
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of results (1-100)",
-                            "default": 5
-                        }
+                            "default": 5,
+                        },
                     },
-                    "required": ["query"]
-                }
-            }
+                    "required": ["query"],
+                },
+            },
         },
         {
             "type": "function",
@@ -565,25 +543,22 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The URL to scrape"
-                        },
+                        "url": {"type": "string", "description": "The URL to scrape"},
                         "formats": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Content formats to extract (markdown, html, links, screenshot)",
-                            "default": ["markdown"]
+                            "default": ["markdown"],
                         },
                         "only_main_content": {
                             "type": "boolean",
                             "description": "Extract only main content, excluding headers/footers/nav",
-                            "default": True
-                        }
+                            "default": True,
+                        },
                     },
-                    "required": ["url"]
-                }
-            }
+                    "required": ["url"],
+                },
+            },
         },
         {
             "type": "function",
@@ -595,22 +570,22 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                     "properties": {
                         "url": {
                             "type": "string",
-                            "description": "The starting URL to crawl"
+                            "description": "The starting URL to crawl",
                         },
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of pages to crawl",
-                            "default": 10
+                            "default": 10,
                         },
                         "max_depth": {
                             "type": "integer",
                             "description": "Maximum depth of crawling",
-                            "default": 2
-                        }
+                            "default": 2,
+                        },
                     },
-                    "required": ["url"]
-                }
-            }
+                    "required": ["url"],
+                },
+            },
         },
         {
             "type": "function",
@@ -622,30 +597,30 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "The name of the new tool (snake_case, must match function name)"
+                            "description": "The name of the new tool (snake_case, must match function name)",
                         },
                         "description": {
                             "type": "string",
-                            "description": "What the tool does"
+                            "description": "What the tool does",
                         },
                         "parameters": {
                             "type": "object",
-                            "description": "JSON schema for the tool's parameters"
+                            "description": "JSON schema for the tool's parameters",
                         },
                         "code": {
                             "type": "string",
-                            "description": "Python function code as a string. Must be a complete async function definition."
+                            "description": "Python function code as a string. Must be a complete async function definition.",
                         },
                         "dependencies": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "List of required Python packages (e.g., ['httpx', 'beautifulsoup4'])"
-                        }
+                            "description": "List of required Python packages (e.g., ['httpx', 'beautifulsoup4'])",
+                        },
                     },
-                    "required": ["name", "description", "parameters", "code"]
-                }
-            }
-        }
+                    "required": ["name", "description", "parameters", "code"],
+                },
+            },
+        },
     ]
 
     # Tool execution functions
@@ -656,7 +631,7 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
         "firecrawl_search": firecrawl.search,
         "firecrawl_scrape": firecrawl.scrape,
         "firecrawl_crawl": firecrawl.crawl,
-        "generate_tool": lambda **kwargs: save_tool(kwargs)
+        "generate_tool": lambda **kwargs: save_tool(kwargs),
     }
 
     return tool_schemas, tool_functions

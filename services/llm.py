@@ -65,23 +65,25 @@ SYSTEM_PROMPT = """
     Complete the user's request fully and autonomously.
 """
 
+
 class Result(BaseModel):
     usage: Dict = Field(default={})
     output: str = Field(default="")
     tool_calls: Optional[list] = Field(default=None)
 
-class Agent():
+
+class Agent:
     def __init__(
         self,
         model: str = "anthropic/claude-haiku-4.5",
         system_prompt: str = SYSTEM_PROMPT,
         firecrawl_api_key: str = FIRECRAWL_API_KEY,
-        save_conversations: bool = True
+        save_conversations: bool = True,
     ):
         self.url = "https://openrouter.ai/api/v1/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         self.model = model
@@ -98,7 +100,9 @@ class Agent():
         self.tool_schemas = base_schemas + gen_schemas
         self.tool_functions = {**base_functions, **gen_functions}
 
-        logger.info(f"Loaded {len(base_schemas)} base tools and {len(gen_schemas)} generated tools")
+        logger.info(
+            f"Loaded {len(base_schemas)} base tools and {len(gen_schemas)} generated tools"
+        )
 
         self.messages = None
         self.result = Result()
@@ -106,12 +110,7 @@ class Agent():
         self.conversation_start_time = None
 
     async def init_messages(self):
-        self.messages = [
-            {
-                "role": "system",
-                "content": self.system_prompt
-            }
-        ]
+        self.messages = [{"role": "system", "content": self.system_prompt}]
         # Generate conversation ID
         self.conversation_start_time = datetime.now()
         self.conversation_id = self.conversation_start_time.strftime("%Y%m%d_%H%M%S")
@@ -133,23 +132,26 @@ class Agent():
             "final_output": final_result.output,
             "usage": final_result.usage,
             "tool_calls_made": [
-                msg for msg in self.messages
+                msg
+                for msg in self.messages
                 if msg.get("role") == "assistant" and msg.get("tool_calls")
             ],
-            "tool_results": [
-                msg for msg in self.messages
-                if msg.get("role") == "tool"
-            ]
+            "tool_results": [msg for msg in self.messages if msg.get("role") == "tool"],
         }
 
         file_path = os.path.join(CONVERSATIONS_DIR, f"{self.conversation_id}.json")
 
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(conversation_data, f, indent=2)
 
         logger.info(f"Conversation saved to {file_path}")
 
-    async def execute_tool(self, tool_name: str, arguments: dict, firecrawl_api_key: str = FIRECRAWL_API_KEY) -> dict:
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict,
+        firecrawl_api_key: str = FIRECRAWL_API_KEY,
+    ) -> dict:
         """
         Execute a tool by name with given arguments.
         Handles both base tools and dynamically generated tools.
@@ -160,7 +162,7 @@ class Agent():
         if tool_name not in self.tool_functions:
             return {
                 "error": f"Tool '{tool_name}' not found in registry",
-                "available_tools": list(self.tool_functions.keys())
+                "available_tools": list(self.tool_functions.keys()),
             }
 
         try:
@@ -178,7 +180,9 @@ class Agent():
             if tool_name == "generate_tool" and result.get("success"):
                 logger.info("Auto-reloading tools after generate_tool execution")
                 self.reload_tools()
-                logger.info(f"Tools reloaded. Now have {len(self.tool_schemas)} total tools")
+                logger.info(
+                    f"Tools reloaded. Now have {len(self.tool_schemas)} total tools"
+                )
 
             return result
         except Exception as e:
@@ -200,20 +204,15 @@ class Agent():
         self.tool_schemas = base_schemas + gen_schemas
         self.tool_functions = {**base_functions, **gen_functions}
 
-        logger.info(f"Reloaded {len(base_schemas)} base tools and {len(gen_schemas)} generated tools")
+        logger.info(
+            f"Reloaded {len(base_schemas)} base tools and {len(gen_schemas)} generated tools"
+        )
 
-    async def run(
-        self,
-        question: str,
-        max_iterations: int = 25
-    ) -> Result:
+    async def run(self, question: str, max_iterations: int = 25) -> Result:
         if self.messages is None:
             await self.init_messages()
 
-        self.messages.append({
-            "role": "user",
-            "content": question
-        })
+        self.messages.append({"role": "user", "content": question})
 
         # Agent loop - handle tool calls iteratively
         for iteration in range(max_iterations):
@@ -228,7 +227,9 @@ class Agent():
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 logger.debug(f"Sending to LLM with {len(self.messages)} messages")
-                response = await client.post(self.url, headers=self.headers, json=payload)
+                response = await client.post(
+                    self.url, headers=self.headers, json=payload
+                )
 
                 logger.info(f"Status: {response.status_code}")
 
@@ -270,28 +271,36 @@ class Agent():
                             else:
                                 tool_args = tool_args_raw
                         except json.JSONDecodeError as e:
-                            logger.error(f"Failed to parse tool arguments for {tool_name}: {e}")
+                            logger.error(
+                                f"Failed to parse tool arguments for {tool_name}: {e}"
+                            )
                             logger.error(f"Raw arguments: {tool_args_raw}")
                             # Return error to LLM
-                            self.messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_id,
-                                "content": json.dumps({
-                                    "error": f"Invalid JSON in tool arguments: {str(e)}",
-                                    "raw_arguments": str(tool_args_raw)[:200]
-                                })
-                            })
+                            self.messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_id,
+                                    "content": json.dumps(
+                                        {
+                                            "error": f"Invalid JSON in tool arguments: {str(e)}",
+                                            "raw_arguments": str(tool_args_raw)[:200],
+                                        }
+                                    ),
+                                }
+                            )
                             continue
 
                         # Execute the tool
                         tool_result = await self.execute_tool(tool_name, tool_args)
 
                         # Add tool result to messages
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_id,
-                            "content": str(tool_result)
-                        })
+                        self.messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_id,
+                                "content": str(tool_result),
+                            }
+                        )
 
                     # Continue loop to get next response
 
@@ -307,5 +316,3 @@ class Agent():
         self.result.output = "Max iterations reached without final response"
         self.save_conversation_history(self.result)
         return self.result
-
-
