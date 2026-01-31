@@ -66,11 +66,7 @@ def generate_embedding(
     """
     try:
         logger.info(f"Generating embedding for text: {text[:100]}...")
-        result = voyage_client.embed(
-            texts=[text],
-            model=model,
-            input_type=input_type
-        )
+        result = voyage_client.embed(texts=[text], model=model, input_type=input_type)
         embedding = result.embeddings[0]
         logger.info(f"Generated embedding of dimension {len(embedding)}")
         return embedding
@@ -185,7 +181,9 @@ def save_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
 
         # Generate preview snippet if not provided
         if "preview_snippet" not in tool_data:
-            params_str = ", ".join(tool_data.get("parameters", {}).get("properties", {}).keys())
+            params_str = ", ".join(
+                tool_data.get("parameters", {}).get("properties", {}).keys()
+            )
             tool_data["preview_snippet"] = f"{tool_data['name']}({params_str})"
 
         # Generate embedding from tool name and description
