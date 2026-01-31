@@ -37,7 +37,7 @@ class ChatRequest(BaseModel):
     """Chat request with enhanced features"""
     message: str = Field(description="User message/command")
     conversation_id: Optional[str] = Field(default=None, description="Conversation ID for continuation")
-    model: str = Field(default="anthropic/claude-haiku-4.5", description="LLM model to use")
+    model: str = Field(default="google/gemini-3-flash-preview", description="LLM model to use")
     stream: bool = Field(default=False, description="Enable streaming response")
     context: Optional[Dict[str, str]] = Field(default=None, description="UI context metadata")
 
