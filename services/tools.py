@@ -301,9 +301,14 @@ def save_tool(tool_definition: dict) -> dict:
     """
     Save a generated tool definition to MongoDB.
     Validates and stores both schema and executable code.
+    Normalizes parameter schema to ensure JSON Schema compliance.
     """
-    name = tool_definition.get("name", "unknown")
-    emit_log("mcp", f"Generating tool: {name}", level="info", tool_name=name)
+    # Normalize parameter schema before validation
+    if "parameters" in tool_definition:
+        tool_definition["parameters"] = normalize_tool_schema(
+            tool_definition["parameters"]
+        )
+
     # Validate tool definition
     tool = ToolDefinition(**tool_definition)
 
@@ -434,6 +439,49 @@ def _get_safe_exec_environment(code: str) -> dict:
     return exec_globals
 
 
+def normalize_tool_schema(schema: dict) -> dict:
+    """
+    Normalize tool parameter schema for JSON Schema compliance.
+    Converts uppercase type values (STRING, INTEGER, etc.) to lowercase.
+    Recursively handles nested objects and arrays.
+
+    Args:
+        schema: Tool parameter schema dictionary
+
+    Returns:
+        Normalized schema with lowercase type values
+    """
+    if not isinstance(schema, dict):
+        return schema
+
+    normalized = {}
+
+    for key, value in schema.items():
+        if key == "type" and isinstance(value, str):
+            # Normalize type to lowercase (STRING -> string, OBJECT -> object, etc.)
+            normalized[key] = value.lower()
+        elif key == "properties" and isinstance(value, dict):
+            # Recursively normalize nested properties
+            normalized[key] = {
+                prop_name: normalize_tool_schema(prop_value)
+                for prop_name, prop_value in value.items()
+            }
+        elif key == "items" and isinstance(value, dict):
+            # Recursively normalize array item schema
+            normalized[key] = normalize_tool_schema(value)
+        elif isinstance(value, dict):
+            # Recursively normalize any nested dicts
+            normalized[key] = normalize_tool_schema(value)
+        elif isinstance(value, list):
+            # Handle lists (like enum values, required fields)
+            normalized[key] = value
+        else:
+            # Keep other values as-is
+            normalized[key] = value
+
+    return normalized
+
+
 async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
     """
     Execute a generated tool by loading its code and running it.
@@ -502,13 +550,13 @@ def load_generated_tools() -> tuple[list[dict], dict[str, Callable]]:
         return wrapper
 
     for tool in tools:
-        # Convert to OpenRouter format
+        # Convert to OpenRouter format with normalized schema
         schema = {
             "type": "function",
             "function": {
                 "name": tool["name"],
                 "description": tool["description"],
-                "parameters": tool["parameters"],
+                "parameters": normalize_tool_schema(tool["parameters"]),
             },
         }
         tool_schemas.append(schema)

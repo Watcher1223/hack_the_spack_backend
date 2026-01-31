@@ -195,10 +195,13 @@ def save_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
         tool_data["embedding"] = embedding
         logger.info(f"Embedding generated, length: {len(embedding)}")
 
+        # Remove _id field if present (can't update immutable _id field)
+        update_data = {k: v for k, v in tool_data.items() if k != "_id"}
+
         # Update if exists, insert if new (upsert based on name)
         logger.info(f"Saving to MongoDB collection: {tools.name}")
         result = tools.update_one(
-            {"name": tool_data["name"]}, {"$set": tool_data}, upsert=True
+            {"name": update_data["name"]}, {"$set": update_data}, upsert=True
         )
 
         logger.info(
