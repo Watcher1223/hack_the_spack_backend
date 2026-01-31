@@ -2,8 +2,8 @@ import httpx
 import json
 import os
 from pathlib import Path
-from typing import Optional, Any, Callable, Awaitable
-from pydantic import BaseModel, Field
+from typing import Optional, Any, Callable
+from pydantic import BaseModel
 
 # ============================================
 # File Operations (artifacts directory)

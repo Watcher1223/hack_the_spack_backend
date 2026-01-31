@@ -309,8 +309,3 @@ class Agent():
         return self.result
 
 
-if __name__ == "__main__":
-    import asyncio
-    question = "How would you build the tallest building ever?"
-    agent = Agent()
-    asyncio.run(agent.run(question))
