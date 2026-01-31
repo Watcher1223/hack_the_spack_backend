@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Optional, Any, Callable
 from pydantic import BaseModel
 
+from services import db
+
 # ============================================
 # File Operations (artifacts directory)
 # ============================================
@@ -268,10 +270,8 @@ class Firecrawl:
 
 
 # ============================================
-# Tool Storage (Pure Python - File-based)
+# Tool Storage (MongoDB)
 # ============================================
-
-TOOLS_DIR = "generated_tools"
 
 
 class ToolDefinition(BaseModel):
@@ -284,52 +284,67 @@ class ToolDefinition(BaseModel):
 
 def save_tool(tool_definition: dict) -> dict:
     """
-    Save a generated tool definition to local storage.
-    Includes both schema and optional executable code.
+    Save a generated tool definition to MongoDB.
+    Validates and stores both schema and executable code.
     """
-    os.makedirs(TOOLS_DIR, exist_ok=True)
-
-    # Validate and create tool definition
+    # Validate tool definition
     tool = ToolDefinition(**tool_definition)
-    file_path = os.path.join(TOOLS_DIR, f"{tool.name}.json")
 
-    with open(file_path, "w") as f:
-        json.dump(tool.model_dump(), f, indent=2)
-
-    return {
-        "success": True,
-        "message": f"Tool '{tool.name}' saved successfully",
-        "path": file_path,
-        "has_code": tool.code is not None,
-    }
+    # Save to MongoDB
+    return db.save_tool(tool.model_dump())
 
 
 def load_tool(name: str) -> dict:
     """
-    Load a tool definition from local storage.
+    Load a tool definition from MongoDB.
     """
-    file_path = os.path.join(TOOLS_DIR, f"{name}.json")
+    tool = db.get_tool(name)
 
-    if not os.path.exists(file_path):
+    if tool is None:
         return {"success": False, "error": f"Tool '{name}' not found"}
 
-    with open(file_path, "r") as f:
-        return json.load(f)
+    return tool
 
 
 def list_tools() -> list[dict]:
     """
-    List all saved tool definitions.
+    List all saved tool definitions from MongoDB.
     """
-    if not os.path.exists(TOOLS_DIR):
-        return []
+    return db.list_tools()
 
-    tools = []
-    for filename in os.listdir(TOOLS_DIR):
-        if filename.endswith(".json"):
-            with open(os.path.join(TOOLS_DIR, filename), "r") as f:
-                tools.append(json.load(f))
-    return tools
+
+async def search_tools(query: str, limit: int = 10) -> dict:
+    """
+    Search for tools using vector similarity.
+    Returns the top N most relevant tools based on the query.
+
+    This is much more efficient than loading all tools when you have many tools.
+    Use this to find tools relevant to a specific task.
+
+    Args:
+        query: Description of what you want to do (e.g., "download images", "get weather data")
+        limit: Maximum number of tools to return (default: 10)
+
+    Returns:
+        Dictionary with success status and list of relevant tools
+    """
+    try:
+        tools = db.search_tools(query, limit)
+        return {
+            "success": True,
+            "query": query,
+            "count": len(tools),
+            "tools": [
+                {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "similarity_score": tool.get("similarity_score", 0),
+                }
+                for tool in tools
+            ],
+        }
+    except Exception as e:
+        return {"success": False, "error": f"Error searching tools: {str(e)}"}
 
 
 async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
@@ -621,6 +636,28 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_tools",
+                "description": "Search the tool marketplace for relevant tools using semantic search. Use this to find existing tools before generating new ones. Returns top 10 most relevant tools.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Description of what you want to do (e.g., 'download images', 'get weather data', 'parse JSON')",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of tools to return (default: 10)",
+                            "default": 10,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
     ]
 
     # Tool execution functions
@@ -632,6 +669,7 @@ def get_base_tools(firecrawl_api_key: str) -> tuple[list[dict], dict[str, Callab
         "firecrawl_scrape": firecrawl.scrape,
         "firecrawl_crawl": firecrawl.crawl,
         "generate_tool": lambda **kwargs: save_tool(kwargs),
+        "search_tools": search_tools,
     }
 
     return tool_schemas, tool_functions

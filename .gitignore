@@ -12,9 +12,7 @@ wheels/
 # Env files
 *.env
 
-# Generated tools and logs
-generated_tools/
+# Logs and temporary files
 logs/
 understand/
-conversations/
 artifacts/

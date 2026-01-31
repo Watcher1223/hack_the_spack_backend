@@ -8,7 +8,7 @@ An autonomous AI agent that can dynamically generate and execute tools by search
 - 🔧 **Dynamic Tool Generation**: Searches for API docs, generates working Python code, and executes it
 - 📁 **File Operations**: Can read, write, and manage files in the `artifacts/` directory
 - 🔄 **Auto-Reload**: Generated tools are immediately available in the same conversation
-- 💾 **Conversation Logging**: All interactions saved to `conversations/` for debugging
+- 💾 **MongoDB Storage**: All conversations and tools stored in MongoDB for persistence
 - 🌐 **Web Integration**: Built-in web search, scraping, and crawling via Firecrawl
 
 ## Quick Start
@@ -73,6 +73,67 @@ The agent will autonomously:
 4. Execute the tool to complete your request
 5. Save results to the `artifacts/` directory
 
+## MongoDB Storage
+
+The application uses MongoDB to store:
+- **Conversations**: Complete conversation history with all messages, tool calls, and results
+- **Tools**: Generated tool definitions with executable Python code and vector embeddings
+
+### Vector Search for Tools
+
+The system uses **vector embeddings** to intelligently search through the tool marketplace. Instead of showing the agent all 1000+ tools (which would confuse it), it uses semantic search to find the top 10 most relevant tools for each task.
+
+**How it works:**
+1. When a tool is saved, the system generates a vector embedding from its name and description
+2. Embeddings are generated using OpenAI's `text-embedding-3-small` model (1536 dimensions)
+3. When searching, the query is embedded and compared using cosine similarity
+4. The top 10 most semantically similar tools are returned
+
+**Benefits:**
+- Agent sees only relevant tools, reducing confusion
+- Faster tool discovery with semantic understanding
+- Scales to thousands of tools without performance issues
+- More accurate than keyword matching
+
+### Local Development with MongoDB
+
+If running locally (without Docker), you'll need MongoDB installed:
+
+```bash
+# Install MongoDB (macOS)
+brew install mongodb-community
+
+# Start MongoDB
+brew services start mongodb-community
+
+# Set MongoDB URI in dev.env
+MONGODB_URI=mongodb://localhost:27017/agent_db
+```
+
+**Note**: When using Docker Compose, MongoDB is automatically set up and configured.
+
+### MongoDB Atlas Vector Search (Optional)
+
+For production deployments, you can use MongoDB Atlas with native vector search:
+
+1. Create a free MongoDB Atlas cluster at https://www.mongodb.com/cloud/atlas
+2. Create a vector search index on the `tools` collection:
+   ```json
+   {
+     "fields": [
+       {
+         "type": "vector",
+         "path": "embedding",
+         "numDimensions": 1536,
+         "similarity": "cosine"
+       }
+     ]
+   }
+   ```
+3. Update `MONGODB_URI` in your `dev.env` to use Atlas connection string
+
+With Atlas Vector Search, queries will use MongoDB's optimized Hierarchical Navigable Small Worlds algorithm for even faster similarity search.
+
 ## Architecture
 
 ### Core Components
@@ -91,15 +152,14 @@ The agent will autonomously:
    - **generate_tool**: Create executable Python tools
 
 3. **Tool Execution**
-   - Generated tools stored as JSON in `generated_tools/`
+   - Generated tools stored in MongoDB
    - Code executed using Python's `exec()` with base64 support
    - Auto-reload makes new tools immediately available
    - Supports both text and binary file operations
 
-4. **File System**
+4. **Storage**
+   - **MongoDB**: Conversations and tool definitions
    - `artifacts/` - Agent's workspace for all file operations
-   - `conversations/` - Saved conversation logs
-   - `generated_tools/` - Tool definitions with executable code
    - `logs/` - Application logs
 
 ## How It Works
@@ -127,26 +187,6 @@ The agent will autonomously:
 ```
 
 All of this happens **autonomously** in one execution, no user intervention required.
-
-## Testing
-
-### Basic Tests
-```bash
-# Test file operations
-uv run test_file_operations.py
-
-# Test tool execution
-uv run test_tool_execution.py
-
-# Test auto-reload feature
-uv run test_auto_reload.py
-```
-
-### Example Scripts
-```bash
-# Run example workflows
-uv run example_usage.py
-```
 
 ## API Server
 
@@ -212,6 +252,104 @@ curl http://localhost:8001/health
 }
 ```
 
+## Tool Marketplace API
+
+The server includes endpoints for browsing and searching the tool marketplace.
+
+### List All Tools
+
+```bash
+# Get all tools with pagination
+curl http://localhost:8001/tools?limit=50&skip=0
+
+# Response
+[
+  {
+    "name": "get_bitcoin_price",
+    "description": "Fetches the current Bitcoin price from CoinGecko API...",
+    "parameters": {...},
+    "code": "async def get_bitcoin_price()...",
+    "created_at": "2026-01-31T08:52:52.949000"
+  }
+]
+```
+
+### Search Tools (Vector Similarity)
+
+```bash
+# Search for tools using semantic search
+curl "http://localhost:8001/tools/search?q=cryptocurrency%20price&limit=10"
+
+# Response
+{
+  "query": "cryptocurrency price",
+  "count": 1,
+  "tools": [
+    {
+      "name": "get_bitcoin_price",
+      "description": "Fetches the current Bitcoin price...",
+      "similarity_score": 0.485,
+      "parameters": {...}
+    }
+  ]
+}
+```
+
+### Get Specific Tool
+
+```bash
+# Get complete tool definition
+curl http://localhost:8001/tools/get_bitcoin_price
+
+# Response includes full code
+{
+  "name": "get_bitcoin_price",
+  "description": "...",
+  "parameters": {...},
+  "code": "import httpx\n\nasync def get_bitcoin_price()..."
+}
+```
+
+### Delete Tool
+
+```bash
+# Remove a tool from marketplace
+curl -X DELETE http://localhost:8001/tools/get_bitcoin_price
+
+# Response
+{
+  "success": true,
+  "message": "Tool 'get_bitcoin_price' deleted successfully"
+}
+```
+
+### List Conversations
+
+```bash
+# Get recent conversations
+curl http://localhost:8001/conversations?limit=20&skip=0
+
+# Response
+[
+  {
+    "id": "697dc2e45e09a3756310636a",
+    "conversation_id": "20260131_085206",
+    "start_time": "2026-01-31T08:52:06.862134",
+    "model": "anthropic/claude-haiku-4.5",
+    "final_output": "I successfully fetched the current Bitcoin price..."
+  }
+]
+```
+
+### Get Specific Conversation
+
+```bash
+# Get full conversation with all messages
+curl http://localhost:8001/conversations/697dc2e45e09a3756310636a
+
+# Returns complete conversation including all tool calls and results
+```
+
 ## Advanced Usage
 
 ### Using the API Module
@@ -267,14 +405,6 @@ The agent will automatically:
 3. Execute the tools
 4. Save results to `artifacts/`
 
-### View Conversation Logs
-
-```bash
-uv run view_conversations.py
-```
-
-Shows complete conversation history with all tool calls and results.
-
 ### Modify Behavior
 
 To change max iterations or other settings, edit `main.py`:
@@ -317,21 +447,19 @@ agent = Agent(
 yc-hack2/
 ├── main.py                      # CLI entry point
 ├── server.py                    # FastAPI server
+├── docker-compose.yml           # Docker setup with MongoDB
+├── Dockerfile                   # Container image
 ├── dev.env                      # Your API keys (gitignored)
 ├── .env.example                 # Template for dev.env
 ├── services/
 │   ├── api.py                  # API interface module
 │   ├── llm.py                  # Agent with autonomous workflow
 │   ├── tools.py                # Base tools + tool execution
+│   ├── db.py                   # MongoDB client and operations
 │   ├── env.py                  # Environment variables
 │   └── logging.py              # Logging configuration
 ├── artifacts/                   # Agent's file workspace (gitignored)
-├── generated_tools/            # Tool definitions (gitignored)
-├── conversations/              # Conversation logs (gitignored)
 ├── logs/                       # Application logs (gitignored)
-├── test_*.py                   # Test scripts
-├── example_usage.py            # Example workflows
-├── view_conversations.py       # View saved conversations
 └── understand/                 # Reference documentation (temporary)
 ```
 
@@ -351,10 +479,12 @@ Increase `max_iterations` in `main.py` for complex tasks.
 
 ## Documentation
 
-- **TOOL_EXECUTION_GUIDE.md** - How tool generation and execution works
-- **BINARY_FILES_GUIDE.md** - Working with images, PDFs, and binary data
-- **IMPLEMENTATION_SUMMARY.md** - What's implemented and what's next
-- **understand/** - Architecture, flows, and data models
+The `understand/` directory contains reference documentation:
+- **architecture.md** - System architecture and components
+- **data-models.md** - Data structures and schemas
+- **flows.md** - Workflow diagrams and sequences
+- **implementation-plan.md** - Development roadmap
+- **prompts-reference.md** - System prompts and examples
 
 ## Docker Deployment
 
@@ -402,9 +532,10 @@ The agent will be available at `http://localhost:8001`
 
 ### Docker Features
 
+- ✅ MongoDB database included
 - ✅ Health checks configured
 - ✅ Auto-restart on failure
-- ✅ Persistent volumes for artifacts, tools, and conversations
+- ✅ Persistent volumes for artifacts and MongoDB data
 - ✅ Optimized layer caching
 - ✅ Non-blocking unbuffered output
 

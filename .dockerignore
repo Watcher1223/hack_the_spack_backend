@@ -17,8 +17,6 @@ dev.env
 
 # Generated/Runtime files
 artifacts/
-generated_tools/
-conversations/
 logs/
 
 # Git
