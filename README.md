@@ -148,9 +148,102 @@ uv run test_auto_reload.py
 uv run example_usage.py
 ```
 
+## API Server
+
+### Run as a REST API
+
+Start the FastAPI server:
+
+```bash
+uv run server.py
+```
+
+The API will be available at `http://localhost:8001` (default)
+
+**Interactive API docs:** http://localhost:8001/docs
+
+**Change port:** Set the `PORT` environment variable:
+```bash
+PORT=9000 uv run server.py
+```
+
+### API Endpoints
+
+#### POST /agent
+Full-featured endpoint with all options:
+
+```bash
+curl -X POST http://localhost:8001/agent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Get the current Bitcoin price",
+    "max_iterations": 25,
+    "model": "anthropic/claude-haiku-4.5",
+    "save_conversation": true
+  }'
+```
+
+#### POST /agent/simple
+Simplified endpoint with query parameters:
+
+```bash
+curl -X POST "http://localhost:8001/agent/simple?prompt=Get%20Bitcoin%20price&max_iterations=10"
+```
+
+#### GET /health
+Health check:
+
+```bash
+curl http://localhost:8001/health
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "output": "The current Bitcoin price is $45,234.56 USD...",
+  "usage": {
+    "prompt_tokens": 1234,
+    "completion_tokens": 567,
+    "total_tokens": 1801
+  },
+  "error": null
+}
+```
+
 ## Advanced Usage
 
-### Running Different Tasks
+### Using the API Module
+
+Import and use the agent programmatically in your Python scripts:
+
+```python
+from services.api import ask, run_agent_sync, run_agent
+
+# Quick usage - returns string output
+output = ask("Get the current Bitcoin price")
+print(output)
+
+# Full control - returns structured response
+result = run_agent_sync(
+    prompt="Download a cat image",
+    max_iterations=20,
+    model="anthropic/claude-haiku-4.5"
+)
+
+if result.success:
+    print(result.output)
+    print(f"Tokens used: {result.usage}")
+else:
+    print(f"Error: {result.error}")
+
+# Async usage
+import asyncio
+result = await run_agent("Your question here")
+```
+
+### Running Different Tasks via CLI
 
 Simply pass different questions as command-line arguments:
 
@@ -222,10 +315,12 @@ agent = Agent(
 
 ```
 yc-hack2/
-├── main.py                      # Main entry point
+├── main.py                      # CLI entry point
+├── server.py                    # FastAPI server
 ├── dev.env                      # Your API keys (gitignored)
 ├── .env.example                 # Template for dev.env
 ├── services/
+│   ├── api.py                  # API interface module
 │   ├── llm.py                  # Agent with autonomous workflow
 │   ├── tools.py                # Base tools + tool execution
 │   ├── env.py                  # Environment variables
@@ -260,6 +355,58 @@ Increase `max_iterations` in `main.py` for complex tasks.
 - **BINARY_FILES_GUIDE.md** - Working with images, PDFs, and binary data
 - **IMPLEMENTATION_SUMMARY.md** - What's implemented and what's next
 - **understand/** - Architecture, flows, and data models
+
+## Docker Deployment
+
+### Build and Run with Docker
+
+```bash
+# Build the image
+docker build -t autonomous-agent .
+
+# Run with environment variables
+docker run -d \
+  -p 8001:8001 \
+  -e OPENROUTER_API_KEY=your_key \
+  -e FIRECRAWL_API_KEY=your_key \
+  --name agent \
+  autonomous-agent
+
+# Check logs
+docker logs -f agent
+
+# Stop
+docker stop agent
+```
+
+### Using Docker Compose
+
+1. Create a `dev.env` file with your API keys (see `.env.example`)
+
+2. Start the service:
+```bash
+docker-compose up -d
+```
+
+3. View logs:
+```bash
+docker-compose logs -f
+```
+
+4. Stop the service:
+```bash
+docker-compose down
+```
+
+The agent will be available at `http://localhost:8001`
+
+### Docker Features
+
+- ✅ Health checks configured
+- ✅ Auto-restart on failure
+- ✅ Persistent volumes for artifacts, tools, and conversations
+- ✅ Optimized layer caching
+- ✅ Non-blocking unbuffered output
 
 ## Contributing
 
