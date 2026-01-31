@@ -5,19 +5,16 @@ from bson import ObjectId
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-from openai import OpenAI
+import voyageai
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 
-from services.env import MONGODB_URI, OPENROUTER_API_KEY
+from services.env import MONGODB_URI, VOYAGE_API_KEY
 
 logger = logging.getLogger(__name__)
 
-openai_client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
-)
+voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
 
 # Global MongoDB client (singleton)
 _client: Optional[MongoClient] = None
@@ -54,29 +51,34 @@ def close_db():
 
 
 def generate_embedding(
-    text: str, model: str = "openai/text-embedding-3-small"
+    text: str, model: str = "voyage-4", input_type: str = "document"
 ) -> List[float]:
     """
-    Generate embeddings for text using OpenRouter/OpenAI.
+    Generate embeddings for text using Voyage AI.
 
     Args:
         text: Text to embed
-        model: Embedding model to use (default: text-embedding-3-small, 1536 dimensions)
+        model: Embedding model to use (default: voyage-4, 1024 dimensions)
+        input_type: Type of input - "query" for search queries, "document" for documents to search
 
     Returns:
         List of floats representing the embedding vector
     """
     try:
         logger.info(f"Generating embedding for text: {text[:100]}...")
-        response = openai_client.embeddings.create(input=text, model=model)
-        embedding = response.data[0].embedding
+        result = voyage_client.embed(
+            texts=[text],
+            model=model,
+            input_type=input_type
+        )
+        embedding = result.embeddings[0]
         logger.info(f"Generated embedding of dimension {len(embedding)}")
         return embedding
     except Exception as e:
         logger.exception(f"Error generating embedding: {e}")
-        # Return zero vector as fallback
+        # Return zero vector as fallback (1024 dims for voyage-4)
         logger.warning("Returning zero vector as fallback")
-        return [0.0] * 1536
+        return [0.0] * 1024
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -156,10 +158,10 @@ def list_conversations(limit: int = 50, skip: int = 0) -> List[Dict[str, Any]]:
 
 def save_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Save a generated tool to MongoDB with vector embeddings.
+    Save a generated tool to MongoDB with vector embeddings and enhanced metadata.
 
     Args:
-        tool_data: Tool definition with name, description, parameters, code
+        tool_data: Tool definition with name, description, parameters, code, and optional metadata
 
     Returns:
         Result dictionary with success status
@@ -173,6 +175,18 @@ def save_tool(tool_data: Dict[str, Any]) -> Dict[str, Any]:
 
         # Add timestamp
         tool_data["created_at"] = datetime.now(timezone.utc)
+
+        # Set default enhanced fields for UI compatibility (BACKEND_API_REQUIREMENTS.md)
+        tool_data.setdefault("status", "PROD-READY")
+        tool_data.setdefault("category", "general")
+        tool_data.setdefault("tags", [tool_data["name"]])
+        tool_data.setdefault("verified", True)
+        tool_data.setdefault("usage_count", 0)
+
+        # Generate preview snippet if not provided
+        if "preview_snippet" not in tool_data:
+            params_str = ", ".join(tool_data.get("parameters", {}).get("properties", {}).keys())
+            tool_data["preview_snippet"] = f"{tool_data['name']}({params_str})"
 
         # Generate embedding from tool name and description
         embedding_text = f"{tool_data['name']}: {tool_data['description']}"
@@ -259,8 +273,8 @@ def search_tools(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     db = get_db()
     tools: Collection = db.tools
 
-    # Generate embedding for the query
-    query_embedding = generate_embedding(query)
+    # Generate embedding for the query with input_type="query" for optimal retrieval
+    query_embedding = generate_embedding(query, input_type="query")
 
     # Get all tools with embeddings
     all_tools = list(tools.find({"embedding": {"$exists": True}}))

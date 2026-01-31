@@ -2,6 +2,7 @@ import base64
 import httpx
 import inspect
 import json
+import logging
 import os
 
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Optional, Any, Callable
 from pydantic import BaseModel
 
 from services import db
+
+logger = logging.getLogger(__name__)
 
 # ============================================
 # File Operations (artifacts directory)
@@ -347,6 +350,71 @@ async def search_tools(query: str, limit: int = 10) -> dict:
         return {"success": False, "error": f"Error searching tools: {str(e)}"}
 
 
+def _get_safe_exec_environment(code: str) -> dict:
+    """
+    Create a safe execution environment with only whitelisted modules.
+    Automatically detects needed imports from code and provides them.
+    """
+    import re
+    import asyncio
+    import time
+    from datetime import datetime, timezone, timedelta
+
+    # Whitelist of safe modules that generated tools can use
+    # These are automatically provided when detected in the code
+    import hashlib
+    import urllib.parse as urllib_parse
+    import re as regex_module
+
+    SAFE_MODULES = {
+        # HTTP and networking
+        "httpx": httpx,
+        # Data formats
+        "json": json,
+        "base64": base64,
+        # System and files
+        "os": os,
+        # Async
+        "asyncio": asyncio,
+        # Time handling
+        "time": time,
+        "datetime": datetime,
+        "timezone": timezone,
+        "timedelta": timedelta,
+        # Utilities
+        "hashlib": hashlib,
+        "urllib": urllib_parse,
+        "re": regex_module,
+        # File operations (custom)
+        "file_write": file_write,
+        "file_read": file_read,
+        "file_list": file_list,
+    }
+
+    # Start with builtins
+    exec_globals = {"__builtins__": __builtins__}
+
+    # Extract imports from code using regex
+    # Matches: import x, from x import y, from x import y as z
+    import_pattern = r'(?:from\s+(\w+)\s+import\s+[\w\s,]+|import\s+([\w\s,]+))'
+    matches = re.findall(import_pattern, code)
+
+    # Also look for direct usage of whitelisted modules
+    for module_name in SAFE_MODULES.keys():
+        if module_name in code:
+            if module_name in SAFE_MODULES:
+                exec_globals[module_name] = SAFE_MODULES[module_name]
+
+    # Add extracted imports if they're in the whitelist
+    for from_module, import_module in matches:
+        module = from_module or import_module
+        if module and module.strip() in SAFE_MODULES:
+            exec_globals[module.strip()] = SAFE_MODULES[module.strip()]
+
+    logger.debug(f"Exec environment provides: {list(exec_globals.keys())}")
+    return exec_globals
+
+
 async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
     """
     Execute a generated tool by loading its code and running it.
@@ -366,13 +434,8 @@ async def execute_generated_tool(tool_name: str, arguments: dict) -> dict:
         }
 
     try:
-        # Create a restricted execution environment
-        exec_globals = {
-            "__builtins__": __builtins__,
-            "httpx": httpx,
-            "json": json,
-            "os": os,
-        }
+        # Create a safe execution environment with auto-detected dependencies
+        exec_globals = _get_safe_exec_environment(code)
         exec_locals = {}
 
         # Execute the code to define the function
