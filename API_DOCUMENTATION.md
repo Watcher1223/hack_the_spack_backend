@@ -33,6 +33,8 @@ This AI agent system provides:
 ✅ Tool persistence and reuse across conversations
 ✅ MongoDB-backed storage with vector similarity
 ✅ Real-time tool execution with error handling
+✅ **Real-time agent log streaming (SSE)** — firecrawl, tool generation, tool execution logs for the frontend
+✅ **Generated tool code API** — `GET /tools/{name}/code` for displaying tool source in the UI
 ✅ Support for multiple LLM providers (Anthropic via OpenRouter)
 
 ---
@@ -179,7 +181,93 @@ print(result["response"])
 
 ---
 
-### 2. List Tools
+### 2. Real-Time Discovery Stream (Agent Logs)
+
+**GET** `/api/discovery/stream`
+
+Stream live agent logs over Server-Sent Events (SSE). Use this to show the frontend what the agent is doing in real time (e.g. “Searching web…”, “Crawling URL…”, “Generating tool…”, “Executing tool…”).
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `conversation_id` | string | No | Conversation to stream logs for. If omitted, the server returns a new `conversation_id` in the first event; use that same ID in **POST /chat** so logs from that chat are streamed here. |
+
+#### Flow
+
+1. **Open the stream** (with or without `conversation_id`):
+   - `GET /api/discovery/stream` — server sends a first event with `conversation_id`.
+   - `GET /api/discovery/stream?conversation_id=<id>` — stream logs for that conversation.
+2. **Send the chat** using the same `conversation_id`: `POST /chat` with `"conversation_id": "<id>"`.
+3. **Consume events** — each SSE `data` line is a JSON log entry until `[DONE]`.
+
+#### Event Format
+
+Each event (except the first “connected” and the final `[DONE]`) is a JSON object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | string | Time (e.g. `HH:MM:SS.mmm`) |
+| `source` | string | `firecrawl` \| `mcp` \| `agent` \| `system` |
+| `message` | string | Human-readable log message |
+| `level` | string | `info` \| `success` \| `error` \| `warn` |
+| *(optional)* | object | Extra fields (e.g. `url`, `tool_name`, `query`) |
+
+#### Event Sources
+
+- **`firecrawl`** — Web search, scrape, crawl (e.g. “Searching web…”, “Crawling https://…”).
+- **`mcp`** — Tool generation (e.g. “Generating tool: get_crypto_price”, “Tool registered in marketplace”).
+- **`agent`** — Agent steps (e.g. “Executing tool: get_crypto_price”, “Reading file: …”, “Tool completed”).
+- **`system`** — Stream lifecycle (e.g. “Stream connected”, “Stream timeout”).
+
+#### Example Event Sequence
+
+```json
+{"type": "connected", "conversation_id": "550e8400-e29b-41d4-a716-446655440000", "timestamp": "12:00:01.234", "source": "system", "message": "Stream connected", "level": "info"}
+{"timestamp": "12:00:02.100", "source": "agent", "message": "Searching tools: bitcoin price...", "level": "info"}
+{"timestamp": "12:00:02.500", "source": "firecrawl", "message": "Crawling https://api.example.com/docs...", "level": "info", "url": "https://api.example.com/docs"}
+{"timestamp": "12:00:04.000", "source": "mcp", "message": "Generating tool: get_crypto_price", "level": "info", "tool_name": "get_crypto_price"}
+{"timestamp": "12:00:04.200", "source": "mcp", "message": "Tool 'get_crypto_price' registered in marketplace", "level": "success"}
+{"timestamp": "12:00:04.500", "source": "agent", "message": "Executing tool: get_crypto_price", "level": "info", "tool_name": "get_crypto_price"}
+{"timestamp": "12:00:05.000", "source": "agent", "message": "Tool get_crypto_price completed", "level": "info"}
+```
+
+Then the stream sends `data: [DONE]\n\n` and closes.
+
+#### Example Usage (JavaScript)
+
+```javascript
+const conversationId = null; // or from previous stream
+const url = conversationId
+  ? `http://localhost:8001/api/discovery/stream?conversation_id=${conversationId}`
+  : 'http://localhost:8001/api/discovery/stream';
+const eventSource = new EventSource(url);
+
+eventSource.onmessage = (event) => {
+  if (event.data === '[DONE]') {
+    eventSource.close();
+    return;
+  }
+  const logEntry = JSON.parse(event.data);
+  if (logEntry.conversation_id && !conversationId) {
+    // Use this ID for POST /chat
+    console.log('Use conversation_id:', logEntry.conversation_id);
+  }
+  console.log(`[${logEntry.source}] ${logEntry.message}`);
+};
+```
+
+#### Example Usage (curl)
+
+```bash
+curl -N "http://localhost:8001/api/discovery/stream"
+# Or with conversation_id (e.g. from first event):
+curl -N "http://localhost:8001/api/discovery/stream?conversation_id=550e8400-e29b-41d4-a716-446655440000"
+```
+
+---
+
+### 3. List Tools
 
 **GET** `/tools`
 
@@ -227,7 +315,7 @@ async def list_all_tools():
 
 ---
 
-### 3. Search Tools
+### 4. Search Tools
 
 **GET** `/tools/search`
 
@@ -280,7 +368,7 @@ for tool in results["tools"]:
 
 ---
 
-### 4. Get Tool Details
+### 5. Get Tool Details
 
 **GET** `/tools/{tool_name}`
 
@@ -326,7 +414,70 @@ curl http://localhost:8001/tools/get_crypto_price
 
 ---
 
-### 5. Delete Tool
+### 6. Get Generated Tool Code
+
+**GET** `/tools/{tool_name}/code`
+
+Return the generated Python code for a tool by name. Use this in the frontend to display tool source (e.g. code block, syntax highlighting).
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `tool_name` | string | Name of the tool (e.g. `get_crypto_price`) |
+
+#### Response
+
+```json
+{
+  "success": true,
+  "name": "get_crypto_price",
+  "description": "Get the current price of any cryptocurrency",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "symbol": { "type": "string", "description": "Cryptocurrency symbol (e.g., BTCUSD, ETHUSD)" }
+    },
+    "required": ["symbol"]
+  },
+  "code": "async def get_crypto_price(symbol: str) -> dict:\n    async with httpx.AsyncClient() as client:\n        ...",
+  "language": "python",
+  "preview_snippet": "get_crypto_price(symbol)",
+  "created_at": "2026-01-31T19:14:57.195000"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Whether the request succeeded |
+| `name` | string | Tool name |
+| `description` | string | Tool description |
+| `parameters` | object | JSON schema for parameters |
+| `code` | string | Generated Python source code |
+| `language` | string | Always `"python"` |
+| `preview_snippet` | string | Short signature (e.g. `get_crypto_price(symbol)`) |
+| `created_at` | string | ISO timestamp when the tool was created |
+
+#### Errors
+
+- **404** — Tool not found, or tool has no generated code (schema-only).
+
+#### Example Usage
+
+```bash
+curl http://localhost:8001/tools/get_crypto_price/code
+```
+
+```typescript
+// Frontend: show generated code in a code block
+const res = await fetch(`http://localhost:8001/tools/${toolName}/code`);
+const { code, language, name } = await res.json();
+// Render <pre><code>{code}</code></pre> with syntax highlighting for `language`
+```
+
+---
+
+### 7. Delete Tool
 
 **DELETE** `/tools/{tool_name}`
 
@@ -355,7 +506,7 @@ curl -X DELETE http://localhost:8001/tools/get_crypto_price
 
 ---
 
-### 6. Execute Tool
+### 8. Execute Tool
 
 **POST** `/tools/{tool_name}/execute`
 
@@ -693,6 +844,35 @@ export const chatAPI = {
       params
     );
     return data;
+  },
+
+  // Get generated tool code (for code block / syntax highlight in UI)
+  async getToolCode(toolName: string) {
+    const { data } = await axios.get(`${API_BASE_URL}/tools/${toolName}/code`);
+    return data;
+  },
+
+  // Open discovery stream (SSE) for live agent logs — use same conversation_id as chat
+  openDiscoveryStream(
+    conversationId: string | undefined,
+    onMessage: (log: { source: string; message: string; timestamp: string }) => void,
+    onDone?: () => void,
+    onError?: (err: Error) => void
+  ): EventSource {
+    const url = conversationId
+      ? `${API_BASE_URL}/api/discovery/stream?conversation_id=${conversationId}`
+      : `${API_BASE_URL}/api/discovery/stream`;
+    const es = new EventSource(url);
+    es.onmessage = (e) => {
+      if (e.data === '[DONE]') {
+        es.close();
+        onDone?.();
+        return;
+      }
+      onMessage(JSON.parse(e.data));
+    };
+    es.onerror = () => onError?.(new Error('Discovery stream connection failed'));
+    return es;
   }
 };
 

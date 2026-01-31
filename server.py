@@ -18,6 +18,13 @@ from pydantic import BaseModel, Field
 from services.api import run_agent
 from services.llm import Agent
 from services import db, tools as tools_module
+from services.agent_logs import (
+    get_or_create_queue,
+    set_log_queue,
+    clear_log_queue,
+    put_stream_done,
+    drain_queue_until_done,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -224,10 +231,16 @@ async def chat(request: ChatRequest):
 
         # Step 3: Forging
         step_start = time.time()
-        agent = Agent(model=request.model, save_conversations=True)
-        agent.conversation_id = conversation_id
+        log_queue = await get_or_create_queue(conversation_id)
+        set_log_queue(log_queue)
+        try:
+            agent = Agent(model=request.model, save_conversations=True)
+            agent.conversation_id = conversation_id
 
-        result = await agent.run(request.message, max_iterations=25)
+            result = await agent.run(request.message, max_iterations=25)
+        finally:
+            clear_log_queue()
+            await put_stream_done(conversation_id)
 
         # Extract tool calls from agent messages
         for msg in agent.messages:
@@ -313,23 +326,20 @@ async def chat(request: ChatRequest):
 @app.get("/api/discovery/stream")
 async def discovery_stream(conversation_id: Optional[str] = None):
     """
-    Server-Sent Events stream for real-time discovery logs.
+    Server-Sent Events stream for real-time agent/discovery logs.
+    Connect with the same conversation_id used in POST /chat to see live logs
+    (e.g. firecrawl search/scrape, tool generation, tool execution).
     """
+    if not conversation_id:
+        conversation_id = str(uuid4())
+    await get_or_create_queue(conversation_id)
+
     async def event_generator():
-        events = [
-            {"timestamp": "00:00:01", "source": "firecrawl", "message": "Initializing web scraper...", "level": "info"},
-            {"timestamp": "00:00:02", "source": "firecrawl", "message": "Crawling API documentation...", "level": "info"},
-            {"timestamp": "00:00:03", "source": "firecrawl", "message": "Found 12 endpoints, 3 auth params", "level": "info"},
-            {"timestamp": "00:00:04", "source": "mcp", "message": "Generating MCP tool definition...", "level": "info"},
-            {"timestamp": "00:00:05", "source": "mcp", "message": "TypeScript code generated successfully", "level": "info"},
-            {"timestamp": "00:00:06", "source": "agent", "message": "Tool registered in marketplace", "level": "info"},
-            {"timestamp": "00:00:07", "source": "system", "message": "✓ Discovery complete", "level": "success"},
-        ]
-
-        for event in events:
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+        yield f"data: {json.dumps({'type': 'connected', 'conversation_id': conversation_id, 'timestamp': ts, 'source': 'system', 'message': 'Stream connected', 'level': 'info'})}\n\n"
+        async for event in drain_queue_until_done(conversation_id, timeout_seconds=360.0):
             yield f"data: {json.dumps(event)}\n\n"
-            await asyncio.sleep(1)
-
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -627,6 +637,43 @@ async def search_tools(
 
     except Exception as e:
         logger.exception(f"Error searching tools: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/tools/{tool_name}/code")
+async def get_tool_code(tool_name: str):
+    """
+    Get the generated Python code for a tool by name.
+    Use this to display tool source code in the frontend (e.g. code block, syntax highlight).
+    """
+    try:
+        tool = db.get_tool(tool_name)
+
+        if not tool:
+            raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+
+        code = tool.get("code")
+        if not code:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Tool '{tool_name}' has no generated code (schema-only tool)",
+            )
+
+        return {
+            "success": True,
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "parameters": tool.get("parameters", {}),
+            "code": code,
+            "language": "python",
+            "preview_snippet": tool.get("preview_snippet"),
+            "created_at": tool.get("created_at").isoformat() if tool.get("created_at") else None,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting tool code: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

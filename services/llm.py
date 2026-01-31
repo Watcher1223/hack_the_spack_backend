@@ -7,6 +7,7 @@ from services.logging import get_logger
 from services.env import OPENROUTER_API_KEY, FIRECRAWL_API_KEY
 from services.tools import get_base_tools, load_generated_tools
 from services import db
+from services.agent_logs import emit_log
 
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -244,6 +245,7 @@ class Agent:
         # Agent loop - handle tool calls iteratively
         for iteration in range(max_iterations):
             logger.info(f"Agent iteration {iteration + 1}/{max_iterations}")
+            emit_log("agent", f"Iteration {iteration + 1}/{max_iterations}", level="info", iteration=iteration + 1)
 
             payload = {
                 "model": self.model,
@@ -282,9 +284,11 @@ class Agent:
 
                     # Execute tool calls
                     logger.info(f"Processing {len(tool_calls)} tool call(s)")
+                    emit_log("agent", f"Processing {len(tool_calls)} tool call(s)", level="info", count=len(tool_calls))
                     for tool_call in tool_calls:
                         tool_name = tool_call["function"]["name"]
                         tool_id = tool_call["id"]
+                        emit_log("agent", f"Executing tool: {tool_name}", level="info", tool_name=tool_name)
 
                         # Parse arguments safely
                         tool_args_raw = tool_call["function"]["arguments"]
@@ -319,6 +323,10 @@ class Agent:
 
                         # Execute the tool
                         tool_result = await self.execute_tool(tool_name, tool_args)
+                        if "error" in tool_result:
+                            emit_log("agent", f"Tool {tool_name} error: {str(tool_result.get('error', ''))[:80]}", level="error", tool_name=tool_name)
+                        else:
+                            emit_log("agent", f"Tool {tool_name} completed", level="info", tool_name=tool_name)
 
                         # Add tool result to messages
                         self.messages.append(

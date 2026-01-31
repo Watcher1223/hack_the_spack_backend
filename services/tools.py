@@ -10,6 +10,7 @@ from typing import Optional, Any, Callable
 from pydantic import BaseModel
 
 from services import db
+from services.agent_logs import emit_log
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ async def file_read(
         encoding: Text encoding (default: utf-8), ignored for binary mode
     """
     try:
+        emit_log("agent", f"Reading file: {filepath}", level="info", filepath=filepath)
         safe_path = _get_safe_path(filepath)
 
         if not safe_path.exists():
@@ -209,6 +211,7 @@ class Firecrawl:
         """
         Search the web using Firecrawl and get full page content.
         """
+        emit_log("firecrawl", f"Searching web: {query[:80]}...", level="info", query=query, limit=limit)
         url = f"{self.base_url}/search"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -219,7 +222,10 @@ class Firecrawl:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            count = len(data.get("data", [])) if isinstance(data.get("data"), list) else 0
+            emit_log("firecrawl", f"Found {count} result(s) for search", level="info", count=count)
+            return data
 
     async def scrape(
         self,
@@ -231,6 +237,7 @@ class Firecrawl:
         """
         Scrape a single URL and extract content in specified formats.
         """
+        emit_log("firecrawl", f"Crawling {url[:80]}...", level="info", url=url)
         api_url = f"{self.base_url}/scrape"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -246,7 +253,9 @@ class Firecrawl:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            emit_log("firecrawl", f"Scraped content from {url[:50]}...", level="info", url=url)
+            return data
 
     async def crawl(
         self, url: str, limit: int = 10, max_depth: int = 2, timeout: int = 120000
@@ -254,6 +263,7 @@ class Firecrawl:
         """
         Crawl an entire website starting from a URL.
         """
+        emit_log("firecrawl", f"Crawling site {url[:80]}...", level="info", url=url, limit=limit)
         api_url = f"{self.base_url}/crawl"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -269,7 +279,9 @@ class Firecrawl:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            emit_log("firecrawl", f"Crawl completed for {url[:50]}...", level="info", url=url)
+            return data
 
 
 # ============================================
@@ -290,11 +302,16 @@ def save_tool(tool_definition: dict) -> dict:
     Save a generated tool definition to MongoDB.
     Validates and stores both schema and executable code.
     """
+    name = tool_definition.get("name", "unknown")
+    emit_log("mcp", f"Generating tool: {name}", level="info", tool_name=name)
     # Validate tool definition
     tool = ToolDefinition(**tool_definition)
 
     # Save to MongoDB
-    return db.save_tool(tool.model_dump())
+    out = db.save_tool(tool.model_dump())
+    if out.get("success"):
+        emit_log("mcp", f"Tool '{name}' registered in marketplace", level="success", tool_name=name)
+    return out
 
 
 def load_tool(name: str) -> dict:
@@ -332,7 +349,9 @@ async def search_tools(query: str, limit: int = 10) -> dict:
         Dictionary with success status and list of relevant tools
     """
     try:
+        emit_log("agent", f"Searching tools: {query[:60]}...", level="info", query=query)
         tools = db.search_tools(query, limit)
+        emit_log("agent", f"Found {len(tools)} relevant tool(s)", level="info", count=len(tools))
         return {
             "success": True,
             "query": query,
