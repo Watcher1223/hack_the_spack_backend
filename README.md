@@ -252,26 +252,28 @@ curl http://localhost:8001/health
 }
 ```
 
-## MCP Server
+## MCP Server (Local Access)
 
-Access the Universal Adapter via MCP (Model Context Protocol) for use with Claude Desktop and other MCP clients.
+Access the Universal Adapter via MCP (Model Context Protocol) for use with Claude Desktop and other local MCP clients.
 
-### Quick Start
+### Architecture
 
-The MCP server exposes your agent as a single `chat` tool. The agent internally has access to all marketplace tools (file operations, web scraping, tool generation, and all dynamically generated tools).
+**Two access methods:**
+- **Local (MCP):** `mcp_server.py` - stdio transport for Claude Desktop
+- **Remote (HTTP):** `server.py` - FastAPI REST API for web access
 
-**Start MCP server (stdio transport):**
-```bash
-uv run mcp_server.py
-```
+Both use the same Agent with all marketplace tools.
 
-### Claude Desktop Configuration
+### Claude Desktop Setup
 
-Add to your Claude Desktop config file:
+The MCP server exposes your agent as a single `chat` tool. The agent internally has access to all marketplace tools.
 
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
+**1. Configure Claude Desktop:**
+
+Add to your config file:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -291,27 +293,27 @@ Add to your Claude Desktop config file:
 }
 ```
 
-After adding this configuration, restart Claude Desktop. The Universal Adapter tools will appear in Claude's tool menu.
+**2. Restart Claude Desktop** - The Universal Adapter tools will appear!
 
 ### Available MCP Tools
 
-- **`chat`** - Chat with the Universal Adapter agent (primary tool)
-- **`list_marketplace_tools`** - List available tools in the marketplace
-- **`health`** - Health check endpoint
+- **`chat`** - Chat with the agent (primary tool)
+- **`list_marketplace_tools`** - Browse marketplace
+- **`health`** - Health check
 
-### Architecture
-
-The MCP server wraps your existing agent system:
+### How It Works
 
 ```
-MCP Client → chat(message) → Agent → Tools → Response
+Claude Desktop → MCP (stdio) → chat(message) → Agent → Tools → Response
 ```
 
-The agent handles all tool orchestration internally (search, generate, execute). You just send a message and get a response.
+The agent handles all tool orchestration internally (search, generate, execute).
+
+**For remote access via HTTP,** use `server.py` instead (see API Server section).
 
 ### Documentation
 
-See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for detailed setup instructions, usage examples, and troubleshooting.
+See [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for detailed setup instructions and troubleshooting.
 
 ## Tool Marketplace API
 
