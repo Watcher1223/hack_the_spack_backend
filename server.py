@@ -894,4 +894,11 @@ if __name__ == "__main__":
     import os
 
     port = int(os.getenv("PORT", 8001))
-    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
+    # Disable reload in production (Railway, Docker) so we bind once and respond to PORT
+    use_reload = os.getenv("RELOAD", "").lower() in ("1", "true", "yes")
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=port,
+        reload=use_reload,
+    )

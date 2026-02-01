@@ -602,6 +602,19 @@ The agent will be available at `http://localhost:8001`
 - ✅ Optimized layer caching
 - ✅ Non-blocking unbuffered output
 
+### Deploy to Railway
+
+1. **Connect** your repo to Railway and use the Dockerfile (or Nixpacks; a `Procfile` is included).
+2. **Set environment variables** in the Railway dashboard (no `dev.env` in deploy):
+   - `OPENROUTER_API_KEY` (required for chat)
+   - `FIRECRAWL_API_KEY` (required for web search/scrape)
+   - `MONGODB_URI` (required; use [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) or Railway MongoDB)
+   - `VOYAGE_API_KEY` (optional; for semantic tool search; app runs without it)
+3. **PORT** is set by Railway; the app binds to `0.0.0.0:$PORT`.
+4. **Health:** Railway can probe `/` or `/health`; both return 200 when the app is up.
+
+If you see "Application failed to respond", check deploy logs for startup errors (e.g. missing `MONGODB_URI` or invalid keys) and ensure all required env vars are set.
+
 ## Contributing
 
 This is a hackathon project. Feel free to extend it with:

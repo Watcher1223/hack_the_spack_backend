@@ -28,9 +28,9 @@ EXPOSE 8001
 ENV PORT=8001
 ENV PYTHONUNBUFFERED=1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8001/health || exit 1
+# Health check (use PORT so Railway's dynamic port works)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD sh -c 'curl -f http://localhost:${PORT:-8001}/health || exit 1'
 
-# Run the server
+# Run the server (reads PORT from env; Railway sets PORT)
 CMD ["uv", "run", "server.py"]
