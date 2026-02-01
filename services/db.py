@@ -14,7 +14,22 @@ from services.env import MONGODB_URI, VOYAGE_API_KEY
 
 logger = logging.getLogger(__name__)
 
-voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
+# Lazy Voyage client so app can start without VOYAGE_API_KEY (embeddings will use zero-vector fallback)
+_voyage_client: Optional[Any] = None
+
+
+def _get_voyage_client():
+    global _voyage_client
+    if _voyage_client is not None:
+        return _voyage_client
+    if not VOYAGE_API_KEY:
+        return None
+    try:
+        _voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
+        return _voyage_client
+    except Exception as e:
+        logger.warning("Voyage client init failed: %s", e)
+        return None
 
 # Global MongoDB client (singleton)
 _client: Optional[MongoClient] = None
@@ -55,6 +70,7 @@ def generate_embedding(
 ) -> List[float]:
     """
     Generate embeddings for text using Voyage AI.
+    If VOYAGE_API_KEY is not set, returns a zero vector so the app can run without embeddings.
 
     Args:
         text: Text to embed
@@ -64,15 +80,18 @@ def generate_embedding(
     Returns:
         List of floats representing the embedding vector
     """
+    client = _get_voyage_client()
+    if client is None:
+        logger.debug("No Voyage API key; using zero vector for embedding")
+        return [0.0] * 1024
     try:
         logger.info(f"Generating embedding for text: {text[:100]}...")
-        result = voyage_client.embed(texts=[text], model=model, input_type=input_type)
+        result = client.embed(texts=[text], model=model, input_type=input_type)
         embedding = result.embeddings[0]
         logger.info(f"Generated embedding of dimension {len(embedding)}")
         return embedding
     except Exception as e:
         logger.exception(f"Error generating embedding: {e}")
-        # Return zero vector as fallback (1024 dims for voyage-4)
         logger.warning("Returning zero vector as fallback")
         return [0.0] * 1024
 
