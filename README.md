@@ -41,8 +41,15 @@ cp .env.example dev.env
 Edit `dev.env` and add your API keys:
 
 ```env
+# Required
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 FIRECRAWL_API_KEY=your_firecrawl_api_key_here
+
+# Optional - for semantic tool search (app works without it)
+VOYAGE_API_KEY=your_voyage_api_key_here
+
+# Optional - defaults to localhost:27017 if not set
+MONGODB_URI=mongodb://localhost:27017/agent_db
 ```
 
 ### 4. Run the Agent
@@ -85,7 +92,7 @@ The system uses **vector embeddings** to intelligently search through the tool m
 
 **How it works:**
 1. When a tool is saved, the system generates a vector embedding from its name and description
-2. Embeddings are generated using OpenAI's `text-embedding-3-small` model (1536 dimensions)
+2. Embeddings are generated using Voyage AI's `voyage-4` model (1024 dimensions)
 3. When searching, the query is embedded and compared using cosine similarity
 4. The top 10 most semantically similar tools are returned
 
@@ -124,7 +131,7 @@ For production deployments, you can use MongoDB Atlas with native vector search:
        {
          "type": "vector",
          "path": "embedding",
-         "numDimensions": 1536,
+         "numDimensions": 1024,
          "similarity": "cosine"
        }
      ]
@@ -489,8 +496,12 @@ agent = Agent(save_conversations=False)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENROUTER_API_KEY` | Yes | API key from OpenRouter.ai |
-| `FIRECRAWL_API_KEY` | Yes | API key from Firecrawl.dev |
+| `OPENROUTER_API_KEY` | Yes | API key from [OpenRouter.ai](https://openrouter.ai/keys) |
+| `FIRECRAWL_API_KEY` | Yes | API key from [Firecrawl.dev](https://firecrawl.dev) |
+| `VOYAGE_API_KEY` | Optional | API key from [Voyage AI](https://dash.voyageai.com/) for semantic tool search embeddings. App works without it (falls back to zero-vector). |
+| `MONGODB_URI` | Optional | MongoDB connection string. Defaults to `mongodb://localhost:27017/agent_db` if not set. Required for production deployments. |
+| `MCP_PORT` | Optional | Port for MCP server (default: 8002) |
+| `MCP_HOST` | Optional | Host for MCP server (default: 0.0.0.0) |
 
 ### Agent Configuration
 
