@@ -14,6 +14,35 @@ from services.agent_logs import emit_log
 
 logger = logging.getLogger(__name__)
 
+# MongoDB BSON document size limit (16MB)
+MAX_MONGODB_DOC_SIZE = 16 * 1024 * 1024  # 16 MB
+# Use 10MB as safe threshold to account for other fields
+SAFE_CONTENT_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def _check_document_size(doc: dict, max_size: int = SAFE_CONTENT_SIZE) -> dict:
+    """
+    Check if document size is within MongoDB limits.
+    Returns dict with size info and warnings.
+
+    Args:
+        doc: Document to check
+        max_size: Maximum safe size in bytes
+
+    Returns:
+        dict with size, is_safe, and warnings
+    """
+    import sys
+    doc_size = sys.getsizeof(json.dumps(doc))
+
+    return {
+        "size_bytes": doc_size,
+        "size_mb": round(doc_size / (1024 * 1024), 2),
+        "is_safe": doc_size < max_size,
+        "limit_mb": round(max_size / (1024 * 1024), 2)
+    }
+
+
 # ============================================
 # File Operations (artifacts directory)
 # ============================================
@@ -414,8 +443,31 @@ def save_tool(tool_definition: dict) -> dict:
                 "type": validation_result.get("type", "ValidationError")
             }
 
+    # Remove large fields before saving to avoid DocumentTooLarge errors
+    # MongoDB has a 16MB BSON document limit
+    tool_dict = tool.model_dump()
+
+    # If there's api_docs_content, remove it (we only need hash for change detection)
+    if "api_docs_content" in tool_dict:
+        import hashlib
+        # Store only hash, not full content
+        content = tool_dict.pop("api_docs_content")
+        tool_dict["api_docs_hash"] = hashlib.sha256(content.encode()).hexdigest()
+        logger.info(f"Removed large api_docs_content ({len(content)} bytes), stored hash instead")
+
+    # Check document size before saving
+    size_info = _check_document_size(tool_dict)
+    if not size_info["is_safe"]:
+        logger.warning(
+            f"Tool document is large ({size_info['size_mb']}MB). "
+            f"Limit: {size_info['limit_mb']}MB. May cause issues."
+        )
+        # Try to truncate large code if present
+        if "code" in tool_dict and len(tool_dict["code"]) > 1_000_000:
+            logger.warning("Code field is very large, this may cause DocumentTooLarge errors")
+
     # Save to MongoDB only if validation passed
-    out = db.save_tool(tool.model_dump())
+    out = db.save_tool(tool_dict)
     if out.get("success"):
         emit_log(
             "mcp",
