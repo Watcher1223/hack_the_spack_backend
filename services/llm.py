@@ -6,7 +6,7 @@ import logging
 from services.logging import get_logger
 from services.env import OPENROUTER_API_KEY, FIRECRAWL_API_KEY
 from services.tools import get_base_tools, load_generated_tools
-from services import db
+from services.db import Database
 from services.agent_logs import emit_log
 
 from datetime import datetime
@@ -118,6 +118,7 @@ class Agent:
         system_prompt: str = SYSTEM_PROMPT,
         firecrawl_api_key: str = FIRECRAWL_API_KEY,
         save_conversations: bool = True,
+        db: Optional[Database] = None,
     ):
         self.url = "https://openrouter.ai/api/v1/chat/completions"
         self.headers = {
@@ -128,6 +129,7 @@ class Agent:
         self.model = model
         self.system_prompt = system_prompt
         self.save_conversations = save_conversations
+        self.db = db  # Database instance for saving conversations
 
         # Load base tools
         base_schemas, base_functions = get_base_tools(firecrawl_api_key)
@@ -156,7 +158,7 @@ class Agent:
 
     def save_conversation_history(self, final_result: Result):
         """Save the complete conversation history to MongoDB"""
-        if not self.save_conversations:
+        if not self.save_conversations or not self.db:
             return
 
         conversation_data = {
@@ -176,7 +178,7 @@ class Agent:
             "tool_results": [msg for msg in self.messages if msg.get("role") == "tool"],
         }
 
-        conversation_id = db.save_conversation(conversation_data)
+        conversation_id = self.db.save_conversation(conversation_data)
         logger.info(f"Conversation saved to MongoDB with ID: {conversation_id}")
 
     async def execute_tool(

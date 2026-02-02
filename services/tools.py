@@ -9,10 +9,21 @@ from pathlib import Path
 from typing import Optional, Any, Callable
 from pydantic import BaseModel
 
-from services import db
+from services.db import Database
 from services.agent_logs import emit_log
 
 logger = logging.getLogger(__name__)
+
+# Lazy singleton for database connection
+_db_instance: Optional[Database] = None
+
+
+def get_db_instance() -> Database:
+    """Get or create the database instance"""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = Database()
+    return _db_instance
 
 # MongoDB BSON document size limit (16MB)
 MAX_MONGODB_DOC_SIZE = 16 * 1024 * 1024  # 16 MB
@@ -467,7 +478,7 @@ def save_tool(tool_definition: dict) -> dict:
             logger.warning("Code field is very large, this may cause DocumentTooLarge errors")
 
     # Save to MongoDB only if validation passed
-    out = db.save_tool(tool_dict)
+    out = get_db_instance().save_tool(tool_dict)
     if out.get("success"):
         emit_log(
             "mcp",
@@ -482,7 +493,7 @@ def load_tool(name: str) -> dict:
     """
     Load a tool definition from MongoDB.
     """
-    tool = db.get_tool(name)
+    tool = get_db_instance().get_tool(name)
 
     if tool is None:
         return {"success": False, "error": f"Tool '{name}' not found"}
@@ -494,7 +505,7 @@ def list_tools() -> list[dict]:
     """
     List all saved tool definitions from MongoDB.
     """
-    return db.list_tools()
+    return get_db_instance().list_tools()
 
 
 async def search_tools(query: str, limit: int = 10) -> dict:
@@ -516,7 +527,7 @@ async def search_tools(query: str, limit: int = 10) -> dict:
         emit_log(
             "agent", f"Searching tools: {query[:60]}...", level="info", query=query
         )
-        tools = db.search_tools(query, limit)
+        tools = get_db_instance().search_tools(query, limit)
         emit_log(
             "agent",
             f"Found {len(tools)} relevant tool(s)",

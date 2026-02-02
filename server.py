@@ -7,17 +7,31 @@ import asyncio
 import json
 import logging
 import time
+
+from bson import ObjectId
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
 from services.llm import Agent
-from services import db, tools as tools_module
+from services.db import Database
+from services import tools as tools_module
+from services.models import (
+    ChatRequest,
+    WorkflowStep,
+    ToolCall,
+    ActionLog,
+    ChatMetadata,
+    ChatResponse,
+    ToolExecuteResponse,
+    EnhancedTool,
+    ConversationSummary
+)
 from services.agent_logs import (
     get_or_create_queue,
     set_log_queue,
@@ -25,215 +39,83 @@ from services.agent_logs import (
     put_stream_done,
     drain_queue_until_done,
 )
+from services.env import ALLOWED_ORIGINS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ============================================
-# Pydantic Models
-# ============================================
+# Global database instance
+db_instance: Optional[Database] = None
 
 
-class ChatRequest(BaseModel):
-    """Chat request with enhanced features"""
-
-    message: str = Field(description="User message/command")
-    conversation_id: Optional[str] = Field(
-        default=None, description="Conversation ID for continuation"
-    )
-    model: str = Field(
-        default="google/gemini-3-flash-preview", description="LLM model to use"
-    )
-    stream: bool = Field(default=False, description="Enable streaming response")
-    context: Optional[Dict[str, str]] = Field(
-        default=None, description="UI context metadata"
-    )
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan - startup and shutdown"""
+    global db_instance
+    # Startup
+    logger.info("Starting up - initializing database connection...")
+    db_instance = Database()
+    yield
+    # Shutdown
+    logger.info("Shutting down - closing database connection...")
+    if db_instance:
+        db_instance.close()
 
 
-class WorkflowStep(BaseModel):
-    """Workflow progress step"""
+def get_db() -> Database:
+    """Dependency injection for database"""
+    if db_instance is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    return db_instance
 
-    step: str = Field(description="Step name: checking, discovering, forging, done")
-    status: str = Field(description="Step status: completed, failed")
-    duration_ms: int = Field(description="Duration in milliseconds")
-    message: str = Field(description="Human-readable message")
-
-
-class ToolCall(BaseModel):
-    """Tool execution record"""
-
-    id: str = Field(description="Tool call ID")
-    name: str = Field(description="Tool name")
-    arguments: Dict[str, Any] = Field(description="Tool arguments")
-    result: Optional[Dict[str, Any]] = Field(
-        default=None, description="Execution result"
-    )
-    execution_time_ms: int = Field(description="Execution time in ms")
-    status: str = Field(description="Status: success, error")
-
-
-class ActionLog(BaseModel):
-    """Action log entry for action feed"""
-
-    id: str = Field(description="Action ID")
-    title: str = Field(description="Short action description")
-    detail: str = Field(description="Detailed description")
-    status: str = Field(description="Status: success, pending, error")
-    timestamp: str = Field(description="ISO timestamp")
-    github_pr_url: Optional[str] = Field(default=None)
-    tool_name: Optional[str] = Field(default=None)
-    execution_id: Optional[str] = Field(default=None)
-
-
-class ChatMetadata(BaseModel):
-    """Chat response metadata"""
-
-    total_duration_ms: int
-    tokens_used: int
-    cost_usd: float
-
-
-class ChatResponse(BaseModel):
-    """Enhanced chat response with workflow tracking"""
-
-    success: bool = True
-    response: str = Field(description="Agent response text")
-    conversation_id: str = Field(description="Conversation ID")
-    model: str = Field(description="Model used")
-    workflow_steps: List[WorkflowStep] = Field(
-        default_factory=list, description="Workflow progress"
-    )
-    tool_calls: List[ToolCall] = Field(
-        default_factory=list, description="Tools executed"
-    )
-    actions_logged: List[ActionLog] = Field(
-        default_factory=list, description="Actions for feed"
-    )
-    metadata: ChatMetadata
-
-
-class ToolExecuteResponse(BaseModel):
-    """Tool execution response with metadata"""
-
-    success: bool
-    tool_name: str
-    execution_id: str
-    result: Dict[str, Any]
-    execution_metadata: Dict[str, Any]
-    logs: List[Dict[str, str]]
-
-
-class ForgeRequest(BaseModel):
-    """MCP Forge generation request"""
-
-    source_url: str = Field(description="API documentation URL")
-    force_regenerate: bool = Field(
-        default=False, description="Force regeneration even if exists"
-    )
-
-
-class ForgeResponse(BaseModel):
-    """MCP Forge generation response"""
-
-    success: bool
-    tool_id: str
-    documentation: Dict[str, Any]
-    generated_code: Dict[str, Any]
-    discovery_logs: List[Dict[str, str]]
-    metadata: Dict[str, Any]
-
-
-class EnhancedTool(BaseModel):
-    """Enhanced tool model with UI fields"""
-
-    id: str
-    name: str
-    description: str
-    status: str = Field(
-        default="PROD-READY", description="PROD-READY, BETA, DEPRECATED"
-    )
-    source_url: Optional[str] = Field(default=None, description="Original API docs URL")
-    api_reference_url: Optional[str] = Field(
-        default=None, description="API documentation URL used to generate tool"
-    )
-    preview_snippet: Optional[str] = Field(
-        default=None, description="Type signature preview"
-    )
-    category: Optional[str] = Field(default="general", description="Tool category")
-    tags: List[str] = Field(default_factory=list, description="Searchable tags")
-    verified: bool = Field(default=False, description="Verification status")
-    usage_count: int = Field(default=0, description="Number of executions")
-    mux_playback_id: Optional[str] = Field(default=None, description="Video demo ID")
-    parameters: Dict[str, Any]
-    code: Optional[str] = None
-    created_at: Optional[str] = None
-    similarity_score: Optional[float] = None
-
-
-class Action(BaseModel):
-    """Action feed entry"""
-
-    id: str
-    conversation_id: Optional[str] = None
-    title: str
-    detail: str
-    status: str  # success, pending, error
-    timestamp: str
-    github_pr_url: Optional[str] = None
-    tool_name: Optional[str] = None
-    execution_id: Optional[str] = None
-
-
-class VerifiedTool(BaseModel):
-    """Tool with verification and governance details"""
-
-    id: str
-    name: str
-    description: str
-    status: str
-    source_url: Optional[str] = None
-    preview_snippet: Optional[str] = None
-    verification: Dict[str, Any]
-    governance: Dict[str, Any]
-
-
-class ConversationSummary(BaseModel):
-    """Conversation summary"""
-
-    id: str
-    conversation_id: str
-    start_time: str
-    model: str
-    final_output: str
-
-
-# ============================================
-# FastAPI App
-# ============================================
 
 app = FastAPI(
     title="Universal Adapter API",
     description="AI agent with tool marketplace and governance - Production v2.0",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware for UI integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production with specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ============================================
-# P0 Critical Endpoints
-# ============================================
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "name": "Universal Adapter API",
+        "version": "2.0.0",
+        "status": "production",
+        "endpoints": {
+            "GET /health": "Health check",
+            "POST /chat": "Enhanced chat with workflow steps and tool calls",
+            "GET /api/discovery/stream": "Real-time discovery event stream (SSE)",
+            "GET /tools": "List all tools with enhanced metadata",
+            "POST /tools/{name_or_id}/execute": "Execute tool with detailed logging",
+            "GET /tools/search": "Search for tools based on search query",
+            "GET /tools/{name_or_id}": "Get tool definition",
+            "DELETE /tools/{name_or_id}": "Delete the tool defined",
+            "GET /conversations": "List the conversations",
+            "GET /conversations/{conversation_id}": "Get the conversation from the id",
+        },
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for docker-compose"""
+    return {"status": "healthy", "service": "universal-adapter-api", "version": "2.0.0"}
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, db: Database = Depends(get_db)):
     """
     Enhanced chat endpoint with workflow steps, tool calls, and action logging.
     Implements all P0 requirements for Universal Adapter UI.
@@ -259,7 +141,7 @@ async def chat(request: ChatRequest):
 
         # Step 2: Discovering
         step_start = time.time()
-        search_results = db.search_tools(request.message, limit=3)
+        search_results = db.search_tools(query=request.message, limit=3)
         tool_found = len(search_results) > 0
 
         workflow_steps.append(
@@ -278,7 +160,7 @@ async def chat(request: ChatRequest):
         log_queue = await get_or_create_queue(conversation_id)
         set_log_queue(log_queue)
         try:
-            agent = Agent(model=request.model, save_conversations=True)
+            agent = Agent(model=request.model, db=db)
             agent.conversation_id = conversation_id
 
             result = await agent.run(request.message, max_iterations=25)
@@ -394,7 +276,6 @@ async def discovery_stream(conversation_id: Optional[str] = None):
     await get_or_create_queue(conversation_id)
 
     async def event_generator():
-        from datetime import datetime, timezone
 
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
         yield f"data: {json.dumps({'type': 'connected', 'conversation_id': conversation_id, 'timestamp': ts, 'source': 'system', 'message': 'Stream connected', 'level': 'info'})}\n\n"
@@ -409,7 +290,9 @@ async def discovery_stream(conversation_id: Optional[str] = None):
 
 @app.get("/tools", response_model=List[EnhancedTool])
 async def list_tools(
-    limit: int = Query(default=50, ge=1, le=500), skip: int = Query(default=0, ge=0)
+    limit: int = Query(default=50, ge=1, le=500),
+    skip: int = Query(default=0, ge=0),
+    db: Database = Depends(get_db),
 ):
     """List all tools with enhanced UI fields"""
     try:
@@ -431,7 +314,6 @@ async def list_tools(
                     tags=tool.get("tags", [tool["name"]]),
                     verified=tool.get("verified", True),
                     usage_count=tool.get("usage_count", 0),
-                    mux_playback_id=tool.get("mux_playback_id"),
                     parameters=tool["parameters"],
                     code=tool.get("code"),
                     created_at=tool.get("created_at", "").isoformat()
@@ -447,110 +329,17 @@ async def list_tools(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/forge/generate", response_model=ForgeResponse)
-async def forge_generate(request: ForgeRequest):
-    """Generate MCP tool from API documentation"""
-    try:
-        agent = Agent(save_conversations=True)
-
-        prompt = f"""Generate a complete MCP tool from this API documentation URL: {request.source_url}
-
-        Steps:
-        1. Use firecrawl_scrape to get the API documentation
-        2. Use generate_tool to create a generalized, reusable tool
-        3. Return the tool name
-        """
-
-        await agent.run(prompt, max_iterations=15)
-
-        tool_id = "generated_tool"
-        for msg in agent.messages:
-            if msg.get("role") == "tool" and "generate_tool" in str(msg):
-                try:
-                    content = (
-                        json.loads(msg["content"])
-                        if isinstance(msg["content"], str)
-                        else msg["content"]
-                    )
-                    if isinstance(content, dict) and "name" in content:
-                        tool_id = content["name"]
-                except Exception:
-                    pass
-
-        tool = db.get_tool(tool_id)
-
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool generation failed")
-
-        documentation = {
-            "markdown": f"# API Documentation\n\nGenerated tool for {request.source_url}",
-            "endpoints_found": 12,
-            "auth_params": ["api_key"],
-            "base_url": request.source_url,
-        }
-
-        generated_code = {
-            "typescript": tool.get("code", "// Code not available"),
-            "language": "python",
-            "framework": "mcp",
-        }
-
-        discovery_logs = [
-            {
-                "timestamp": "00:00:01",
-                "source": "firecrawl",
-                "message": f"Crawling {request.source_url}...",
-            },
-            {
-                "timestamp": "00:00:02",
-                "source": "firecrawl",
-                "message": "Extracted API endpoints",
-            },
-            {
-                "timestamp": "00:00:03",
-                "source": "mcp",
-                "message": f"Generating tool: {tool_id}",
-            },
-            {
-                "timestamp": "00:00:04",
-                "source": "mcp",
-                "message": "Tool generated successfully",
-            },
-        ]
-
-        metadata = {
-            "generation_time_ms": 4500,
-            "firecrawl_pages_crawled": 3,
-            "tokens_used": 2500,
-        }
-
-        return ForgeResponse(
-            success=True,
-            tool_id=tool_id,
-            documentation=documentation,
-            generated_code=generated_code,
-            discovery_logs=discovery_logs,
-            metadata=metadata,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Error in forge generation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/tools/{tool_name_or_id}/execute", response_model=ToolExecuteResponse)
-async def execute_tool(tool_name_or_id: str, params: Dict[str, Any]):
+async def execute_tool(
+    tool_name_or_id: str, params: Dict[str, Any], db: Database = Depends(get_db)
+):
     """Execute a tool by name or MongoDB ObjectId with enhanced response metadata"""
     try:
         # Resolve tool name from ID if needed
         if len(tool_name_or_id) == 24 and all(
             c in "0123456789abcdef" for c in tool_name_or_id.lower()
         ):
-            from bson import ObjectId
-
-            tool_doc = db.get_db().tools.find_one({"_id": ObjectId(tool_name_or_id)})
+            tool_doc = db._db.tools.find_one({"_id": ObjectId(tool_name_or_id)})
             if not tool_doc:
                 raise HTTPException(
                     status_code=404,
@@ -564,8 +353,7 @@ async def execute_tool(tool_name_or_id: str, params: Dict[str, Any]):
         started_at = datetime.now(timezone.utc)
 
         logs = [
-            {"timestamp": "00:00:00.100", "message": "Validating parameters..."},
-            {"timestamp": "00:00:00.200", "message": f"Executing {tool_name}..."},
+            {"timestamp": "00:00:00.100", "message": f"Executing {tool_name}..."},
         ]
 
         _, tool_functions = tools_module.load_generated_tools()
@@ -594,7 +382,7 @@ async def execute_tool(tool_name_or_id: str, params: Dict[str, Any]):
         db_tool = db.get_tool(tool_name)
         if db_tool:
             usage_count = db_tool.get("usage_count", 0) + 1
-            db.get_db().tools.update_one(
+            db._db.tools.update_one(
                 {"name": tool_name}, {"$set": {"usage_count": usage_count}}
             )
 
@@ -620,110 +408,15 @@ async def execute_tool(tool_name_or_id: str, params: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ============================================
-# P1 Important Endpoints
-# ============================================
-
-
-@app.get("/api/actions", response_model=List[Action])
-async def get_actions(
-    conversation_id: Optional[str] = None,
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-):
-    """Get action feed with optional conversation filter"""
-    sample_actions = [
-        Action(
-            id="act_001",
-            title="Agent called tool",
-            detail="Executed get_crypto_price with symbol=BTC",
-            status="success",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            tool_name="get_crypto_price",
-            execution_id="exec_123",
-        )
-    ]
-
-    return sample_actions[offset : offset + limit]
-
-
-@app.get("/api/governance/verified-tools", response_model=List[VerifiedTool])
-async def get_verified_tools():
-    """Get verified tools with governance metadata"""
-    tools = db.list_tools()
-    verified = [t for t in tools if t.get("verified", False)]
-
-    response = []
-    for tool in verified:
-        response.append(
-            VerifiedTool(
-                id=tool.get("_id", str(uuid4())),
-                name=tool["name"],
-                description=tool["description"],
-                status=tool.get("status", "PROD-READY"),
-                source_url=tool.get("source_url"),
-                preview_snippet=tool.get("preview_snippet"),
-                verification={
-                    "verified": True,
-                    "verified_at": tool.get(
-                        "created_at", datetime.now(timezone.utc)
-                    ).isoformat(),
-                    "verified_by": "system",
-                    "trust_score": 95,
-                    "security_scan_passed": True,
-                    "last_audit": datetime.now(timezone.utc).isoformat(),
-                },
-                governance={
-                    "approval_required": False,
-                    "allowed_users": ["*"],
-                    "rate_limit_per_minute": 60,
-                    "cost_per_execution": 0.001,
-                },
-            )
-        )
-
-    return response
-
-
-# ============================================
-# Legacy/Compatibility Endpoints
-# ============================================
-
-
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "name": "Universal Adapter API",
-        "version": "2.0.0",
-        "status": "production",
-        "endpoints": {
-            "POST /chat": "Enhanced chat with workflow steps and tool calls",
-            "GET /api/discovery/stream": "Real-time discovery event stream (SSE)",
-            "GET /tools": "List all tools with enhanced metadata",
-            "POST /api/forge/generate": "Generate MCP tool from API docs",
-            "POST /tools/{name}/execute": "Execute tool with detailed logging",
-            "GET /api/actions": "Get action feed",
-            "GET /api/governance/verified-tools": "Get verified tools with governance",
-            "GET /health": "Health check",
-        },
-    }
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for docker-compose"""
-    return {"status": "healthy", "service": "universal-adapter-api", "version": "2.0.0"}
-
-
 @app.get("/tools/search")
 async def search_tools(
     q: str = Query(..., description="Search query"),
     limit: int = Query(default=10, ge=1, le=50),
+    db: Database = Depends(get_db),
 ):
     """Search tools using vector similarity"""
     try:
-        results = db.search_tools(q, limit=limit)
+        results = db.search_tools(query=q, limit=limit)
 
         tools = []
         for tool in results:
@@ -740,7 +433,6 @@ async def search_tools(
                     tags=tool.get("tags", []),
                     verified=tool.get("verified", True),
                     usage_count=tool.get("usage_count", 0),
-                    mux_playback_id=tool.get("mux_playback_id"),
                     parameters=tool["parameters"],
                     code=tool.get("code"),
                     created_at=tool.get("created_at", "").isoformat()
@@ -758,17 +450,14 @@ async def search_tools(
 
 
 @app.get("/tools/{name_or_id}")
-async def get_tool(name_or_id: str):
+async def get_tool(name_or_id: str, db: Database = Depends(get_db)):
     """Get specific tool by name or MongoDB ObjectId"""
     try:
         # Check if it looks like a MongoDB ObjectId (24 hex characters)
         if len(name_or_id) == 24 and all(
             c in "0123456789abcdef" for c in name_or_id.lower()
         ):
-            # Lookup by ID
-            from bson import ObjectId
-
-            tool = db.get_db().tools.find_one({"_id": ObjectId(name_or_id)})
+            tool = db._db.tools.find_one({"_id": ObjectId(name_or_id)})
         else:
             # Lookup by name
             tool = db.get_tool(name_or_id)
@@ -790,7 +479,6 @@ async def get_tool(name_or_id: str):
             tags=tool.get("tags", []),
             verified=tool.get("verified", True),
             usage_count=tool.get("usage_count", 0),
-            mux_playback_id=tool.get("mux_playback_id"),
             parameters=tool["parameters"],
             code=tool.get("code"),
             created_at=tool.get("created_at", "").isoformat()
@@ -806,17 +494,14 @@ async def get_tool(name_or_id: str):
 
 
 @app.delete("/tools/{name_or_id}")
-async def delete_tool(name_or_id: str):
+async def delete_tool(name_or_id: str, db: Database = Depends(get_db)):
     """Delete a tool from the marketplace by name or MongoDB ObjectId"""
     try:
         # Check if it looks like a MongoDB ObjectId
         if len(name_or_id) == 24 and all(
             c in "0123456789abcdef" for c in name_or_id.lower()
         ):
-            # Delete by ID
-            from bson import ObjectId
-
-            result = db.get_db().tools.delete_one({"_id": ObjectId(name_or_id)})
+            result = db._db.tools.delete_one({"_id": ObjectId(name_or_id)})
             deleted = result.deleted_count > 0
         else:
             # Delete by name
@@ -838,7 +523,9 @@ async def delete_tool(name_or_id: str):
 
 @app.get("/conversations", response_model=List[ConversationSummary])
 async def list_conversations(
-    limit: int = Query(default=20, ge=1, le=100), skip: int = Query(default=0, ge=0)
+    limit: int = Query(default=20, ge=1, le=100),
+    skip: int = Query(default=0, ge=0),
+    db: Database = Depends(get_db),
 ):
     """List recent conversations"""
     try:
@@ -868,7 +555,7 @@ async def list_conversations(
 
 
 @app.get("/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str):
+async def get_conversation(conversation_id: str, db: Database = Depends(get_db)):
     """Get a specific conversation by ID"""
     try:
         conversation = db.get_conversation(conversation_id)
@@ -887,6 +574,16 @@ async def get_conversation(conversation_id: str):
         raise HTTPException(
             status_code=500, detail=f"Error getting conversation: {str(e)}"
         )
+
+
+#TODO:
+# @app.get("/api/actions", response_model=List[Action])
+# """Get action feed with optional conversation filter"""
+
+
+# TODO:
+# @app.get("/api/governance/verified-tools", response_model=List[VerifiedTool])
+# """Get verified tools with governance metadata"""
 
 
 if __name__ == "__main__":

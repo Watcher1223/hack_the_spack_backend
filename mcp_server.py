@@ -96,9 +96,10 @@ async def list_marketplace_tools(limit: int = 50) -> dict:
     Returns:
         dict: List of tools with names and descriptions
     """
-    from services import db
+    from services.db import Database
 
     try:
+        db = Database()
         tools = db.list_tools()[:limit]
         return {
             "count": len(tools),

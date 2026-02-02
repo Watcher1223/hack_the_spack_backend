@@ -23,7 +23,6 @@ services:
       - "8001:8001"
     environment:
       - PORT=8001
-      - MONGODB_URI=mongodb://admin:admin123@mongodb:27017/agent_db?authSource=admin
     env_file:
       - dev.env
     volumes:
