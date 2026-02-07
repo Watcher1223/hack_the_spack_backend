@@ -1,0 +1,40 @@
+{
+  "request": {
+    "body": {
+      "$ref": "#/$defs/ChatRequest"
+    },
+    "params": {
+      "cookie": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "header": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "path": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "query": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  "response": {
+    "by_status": {
+      "200": {
+        "$ref": "#/$defs/ChatResponse"
+      },
+      "500": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  }
+}

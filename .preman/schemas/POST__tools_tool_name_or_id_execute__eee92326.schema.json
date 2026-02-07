@@ -1,0 +1,55 @@
+{
+  "request": {
+    "body": {
+      "additionalProperties": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "params": {
+      "cookie": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "header": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "path": {
+        "additionalProperties": false,
+        "properties": {
+          "tool_name_or_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name_or_id"
+        ],
+        "type": "object"
+      },
+      "query": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  "response": {
+    "by_status": {
+      "200": {
+        "$ref": "#/$defs/ToolExecuteResponse"
+      },
+      "404": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "500": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  }
+}

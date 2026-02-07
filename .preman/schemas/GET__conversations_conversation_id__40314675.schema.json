@@ -1,0 +1,49 @@
+{
+  "request": {
+    "params": {
+      "cookie": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "header": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "path": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id"
+        ],
+        "type": "object"
+      },
+      "query": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  "response": {
+    "by_status": {
+      "200": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "404": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "500": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  }
+}
