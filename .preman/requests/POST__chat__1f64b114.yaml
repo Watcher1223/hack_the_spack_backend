@@ -1,0 +1,19 @@
+id: POST__chat__1f64b114
+method: POST
+path: /chat
+description: POST /chat
+request:
+  headers:
+    Content-Type: application/json
+  schema_ref: ../schemas/POST__chat__1f64b114.schema.json#/request/body
+  body_example_ref: ../examples/POST__chat__1f64b114.req-0.json
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/POST__chat__1f64b114.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
