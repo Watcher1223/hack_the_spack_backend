@@ -1,0 +1,17 @@
+id: GET__api_discovery_stream__0ed56908
+method: GET
+path: /api/discovery/stream
+description: GET /api/discovery/stream
+request:
+  query:
+    conversation_id: test
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/GET__api_discovery_stream__0ed56908.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
