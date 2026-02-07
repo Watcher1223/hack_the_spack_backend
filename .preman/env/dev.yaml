@@ -1,0 +1,4 @@
+base_url: http://localhost:8001
+required_env: []
+defaults:
+  TIMEOUT_MS: 10000
