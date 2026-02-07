@@ -1,0 +1,17 @@
+id: GET__tools_search__3560ba33
+method: GET
+path: /tools/search
+description: GET /tools/search
+request:
+  query:
+    q: test
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/GET__tools_search__3560ba33.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
