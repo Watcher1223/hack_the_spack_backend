@@ -1,0 +1,19 @@
+name: smoke
+description: Basic smoke test - hit all endpoints
+env: dev
+steps:
+- request: GET__root__4a243b0d
+- request: GET__conversations__a72357f1
+  capture:
+    conversation_id: $[0]._id
+- request: GET__health__e949ada3
+- request: GET__tools__3a28194b
+  capture:
+    name_or_id: $[0]._id
+    tool_name_or_id: $[0]._id
+- request: GET__tools_search__3560ba33
+- request: GET__conversations_conversation_id__40314675
+- request: GET__tools_name_or_id__6ff8f28f
+- request: POST__chat__1f64b114
+- request: POST__tools_tool_name_or_id_execute__eee92326
+- request: DELETE__tools_name_or_id__77057478
