@@ -1,0 +1,51 @@
+{
+  "request": {
+    "params": {
+      "cookie": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "header": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "path": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "query": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 10,
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "q": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "response": {
+    "by_status": {
+      "200": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "500": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  }
+}
