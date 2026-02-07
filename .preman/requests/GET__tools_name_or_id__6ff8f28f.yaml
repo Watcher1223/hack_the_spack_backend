@@ -1,0 +1,14 @@
+id: GET__tools_name_or_id__6ff8f28f
+method: GET
+path: /tools/:name_or_id
+description: GET /tools/:name_or_id
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/GET__tools_name_or_id__6ff8f28f.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
