@@ -1,0 +1,52 @@
+{
+  "request": {
+    "params": {
+      "cookie": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "header": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "path": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "query": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "skip": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "response": {
+    "by_status": {
+      "200": {
+        "items": {
+          "$ref": "#/$defs/ConversationSummary"
+        },
+        "type": "array"
+      },
+      "500": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    }
+  }
+}

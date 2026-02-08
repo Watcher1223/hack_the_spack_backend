@@ -1,0 +1,280 @@
+{
+  "$defs": {
+    "ChatRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "boolean"
+        }
+      },
+      "title": "ChatRequest",
+      "type": "object"
+    },
+    "ChatResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "actions_logged": {
+          "items": {
+            "$ref": "#/$defs/ActionLog"
+          },
+          "type": "array"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/ChatMetadata"
+        },
+        "model": {
+          "type": "string"
+        },
+        "response": {
+          "type": "string"
+        },
+        "success": {
+          "default": true,
+          "type": "boolean"
+        },
+        "tool_calls": {
+          "items": {
+            "$ref": "#/$defs/ToolCall"
+          },
+          "type": "array"
+        },
+        "workflow_steps": {
+          "items": {
+            "$ref": "#/$defs/WorkflowStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "metadata"
+      ],
+      "title": "ChatResponse",
+      "type": "object"
+    },
+    "ConversationSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "final_output": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "start_time": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "final_output",
+        "id",
+        "model",
+        "start_time"
+      ],
+      "title": "ConversationSummary",
+      "type": "object"
+    },
+    "EnhancedTool": {
+      "additionalProperties": false,
+      "properties": {
+        "api_reference_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "preview_snippet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "similarity_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "usage_count": {
+          "type": "integer"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "description",
+        "id",
+        "name",
+        "parameters"
+      ],
+      "title": "EnhancedTool",
+      "type": "object"
+    },
+    "ToolExecuteResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "execution_metadata": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "logs": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "result": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "execution_metadata",
+        "logs",
+        "result",
+        "success",
+        "tool_name"
+      ],
+      "title": "ToolExecuteResponse",
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+id: GET__health__e949ada3
+method: GET
+path: /health
+description: GET /health
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/GET__health__e949ada3.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
