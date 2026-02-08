@@ -1,0 +1,14 @@
+id: GET__root__4a243b0d
+method: GET
+path: /
+description: GET /
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/GET__root__4a243b0d.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
