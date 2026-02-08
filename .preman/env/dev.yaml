@@ -1,0 +1,4 @@
+base_url: https://forge.api.opentest.live
+required_env: []
+defaults:
+  TIMEOUT_MS: 10000

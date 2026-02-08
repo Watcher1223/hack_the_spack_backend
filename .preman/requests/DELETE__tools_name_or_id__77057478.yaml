@@ -1,0 +1,14 @@
+id: DELETE__tools_name_or_id__77057478
+method: DELETE
+path: /tools/:name_or_id
+description: DELETE /tools/:name_or_id
+response:
+  expect_status:
+  - 200
+  schema_ref: ../schemas/DELETE__tools_name_or_id__77057478.schema.json#/response/by_status/200
+assert:
+- type: status_in
+  value:
+  - 200
+- type: max_latency_ms
+  value: 5000
