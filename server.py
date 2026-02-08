@@ -497,6 +497,8 @@ async def get_tool(name_or_id: str, db: Database = Depends(get_db)):
 async def delete_tool(name_or_id: str, db: Database = Depends(get_db)):
     """Delete a tool from the marketplace by name or MongoDB ObjectId"""
     try:
+        deleted = False
+        
         # Check if it looks like a MongoDB ObjectId
         if len(name_or_id) == 24 and all(
             c in "0123456789abcdef" for c in name_or_id.lower()
